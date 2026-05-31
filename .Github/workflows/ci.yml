@@ -1,0 +1,82 @@
+name: CI/CD Pipeline
+
+# Disparador 
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  # Stage Build
+  build:
+      name: Build & Analyze
+      runs-on: ubuntu-latest
+      
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
+        - name: Stup Flutter
+          uses: subosito/flutter-action@v2
+          with:
+            flutter-version: '3.38.5'
+            channels: 'stable'
+            cache: true
+        - name: Instalacion de dependencias
+          run: flutter pub get
+        - name: Analisis de codigo
+          run: flutter analyze
+    
+  test:
+    name: Pruebas Unitarias
+    runs-on: ubuntu-latest
+    needs: build # Espera a que se ejecute build
+    steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
+        - name: Stup Flutter
+          uses: subosito/flutter-action@v2
+          with:
+            flutter-version: '3.38.5'
+            channels: 'stable'
+            cache: true
+        - name: Instalacion de dependencias
+          run: flutter pub get
+        - name: Ejecución de pruebas unitarias
+          run: flutter test --coverage
+    
+    artifacts:
+      - name: construccion del APK
+        runs-on: ubuntu-latest
+        needs: test # Espera a que se ejecute test
+        steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
+        - name: Stup Flutter
+          uses: subosito/flutter-action@v2
+          with:
+            flutter-version: '3.38.5'
+            channels: 'stable'
+            cache: true
+        - name: Instalacion de dependencias
+          run: flutter pub 
+
+        - name: Construccion Web
+          run: flutter build web --release
+
+        - name: Subir Web
+          uses: actions/upload-artifact@v4
+
+          with:
+            name: web-release
+            path: build/web/
+          
+        - name: Construccion del APK
+          run: flutter build apk --release
+
+        - name: Subir APK
+          uses: actions/upload-artifact@v4
+
+          with:
+            name: app-release.apk
+            path: build/app/outputs/flutter-apk/app-release.apk

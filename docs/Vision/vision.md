@@ -1,0 +1,3 @@
+La visión de este proyecto es desarrollar un framework avanzado de seguridad ofensiva que funcione como un ecosistema automatizado de pentesting, donde una Inteligencia Artificial actúe como el orquestador principal en la toma de decisiones estratégicas durante las fases de reconocimiento y análisis de vulnerabilidades.
+
+El sistema tiene como objetivo optimizar drásticamente el tiempo que los auditores de seguridad dedican a las tareas repetitivas de escaneo, permitiendo que un agente inteligente correlacione datos en tiempo real, descarte falsos positivos y ejecute vectores de ataque de manera dinámica, controlada y segura, elevando el estándar de la auditoría de ciberseguridad moderna.

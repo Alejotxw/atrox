@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     debug: bool = False
     nmap_path: str = "nmap"
     nmap_timeout_seconds: int = 300
+    nuclei_path: str = "nuclei"
+    nuclei_timeout_seconds: int = 300
+    nuclei_sandbox_templates: str | None = None
 
 
 @lru_cache

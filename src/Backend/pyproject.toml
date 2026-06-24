@@ -31,5 +31,5 @@ include = ["atrox*"]
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
-    "integration: pruebas que requieren Nmap instalado en el entorno",
+    "integration: pruebas que requieren herramientas externas (Nmap, Nuclei) instaladas en el entorno",
 ]

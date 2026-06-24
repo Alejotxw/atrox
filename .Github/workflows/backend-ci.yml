@@ -1,0 +1,38 @@
+name: Backend CI
+
+on:
+  push:
+    branches: ["main", "HU-*", "HU=*"]
+    paths:
+      - "src/Backend/**"
+      - ".Github/workflows/backend-ci.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "src/Backend/**"
+      - ".Github/workflows/backend-ci.yml"
+
+jobs:
+  backend-smoke:
+    name: Backend — smoke test healthcheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/Backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: src/Backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run smoke tests
+        run: pytest tests/ -v

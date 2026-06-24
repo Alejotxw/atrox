@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     port: int = 8000
     env: str = "development"
     debug: bool = False
+    nmap_path: str = "nmap"
+    nmap_timeout_seconds: int = 300
 
 
 @lru_cache

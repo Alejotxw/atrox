@@ -53,6 +53,8 @@ cp .env.example .env
 | `ATROX_PORT` | Puerto de Uvicorn | `8000` |
 | `ATROX_ENV` | Entorno (`development` / `production`) | `development` |
 | `ATROX_DEBUG` | Recarga automática en desarrollo | `false` |
+| `ATROX_NMAP_PATH` | Ruta al binario de Nmap | `nmap` |
+| `ATROX_NMAP_TIMEOUT_SECONDS` | Timeout máximo por escaneo | `300` |
 
 ### 4. Iniciar el servidor (Uvicorn async)
 
@@ -89,10 +91,60 @@ Respuesta esperada (`200 OK`, `< 500 ms`):
 
 Documentación interactiva: [http://localhost:8000/docs](http://localhost:8000/docs)
 
+### 6. Escaneo de descubrimiento (HU-002)
+
+Requiere [Nmap](https://nmap.org/download.html) instalado y disponible en el `PATH`.
+
+```bash
+curl -X POST http://localhost:8000/api/discovery/scan \
+  -H "Content-Type: application/json" \
+  -d '{"target": "scanme.nmap.org", "port_range": "22,80"}'
+```
+
+**PowerShell:**
+```powershell
+Invoke-RestMethod -Method POST -Uri http://localhost:8000/api/discovery/scan `
+  -ContentType "application/json" `
+  -Body '{"target":"scanme.nmap.org","port_range":"22,80"}'
+```
+
+Respuesta esperada (`200 OK`):
+
+```json
+{
+  "target": "scanme.nmap.org",
+  "port_range": "22,80",
+  "status": "completed",
+  "hosts": [
+    {
+      "address": "45.33.32.156",
+      "status": "up",
+      "ports": [
+        {
+          "port": 22,
+          "protocol": "tcp",
+          "service": "ssh",
+          "version": "OpenSSH 6.6.1p1"
+        }
+      ]
+    }
+  ],
+  "error": null
+}
+```
+
+Estados posibles: `completed`, `unreachable`, `timeout`, `error`.
+
 ## Pruebas
 
 ```bash
-pytest tests/ -v
+pytest tests/ -v -m "not integration"
+```
+
+Prueba de integración contra target de laboratorio (`scanme.nmap.org`):
+
+```bash
+pytest tests/test_nmap_integration.py -v -m integration
 ```
 
 El smoke test valida que `GET /health` responde `200` en menos de 500 ms.
@@ -102,12 +154,21 @@ El smoke test valida que `GET /health` responde `200` en menos de 500 ms.
 ```
 src/Backend/
 ├── atrox/
-│   ├── api/health.py   # Endpoint GET /health
-│   ├── config.py       # Configuración centralizada (env)
-│   ├── main.py         # Aplicación FastAPI
-│   └── __main__.py     # Punto de entrada Uvicorn
+│   ├── api/
+│   │   ├── health.py       # GET /health
+│   │   └── discovery.py    # POST /api/discovery/scan
+│   ├── scanner/
+│   │   ├── nmap_wrapper.py # Wrapper async de Nmap
+│   │   ├── models.py
+│   │   └── validators.py
+│   ├── config.py
+│   ├── main.py
+│   └── __main__.py
 ├── tests/
-│   └── test_health.py
+│   ├── test_health.py
+│   ├── test_nmap_wrapper.py
+│   ├── test_discovery_api.py
+│   └── test_nmap_integration.py
 ├── pyproject.toml
 └── requirements.txt
 ```
@@ -115,4 +176,5 @@ src/Backend/
 ## Trazabilidad
 
 - **HU-001** — Bootstrap del núcleo FastAPI asíncrono
+- **HU-002** — Descubrimiento de activos con wrapper Nmap (RF-001)
 - **ADR-001** — Lenguaje base y concurrencia

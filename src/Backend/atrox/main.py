@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from atrox.api.discovery import router as discovery_router
 from atrox.api.health import router as health_router
 from atrox.config import get_settings
 
@@ -19,6 +20,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.include_router(health_router)
+    application.include_router(discovery_router)
     return application
 
 

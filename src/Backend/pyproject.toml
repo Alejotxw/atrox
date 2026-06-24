@@ -30,3 +30,6 @@ include = ["atrox*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: pruebas que requieren Nmap instalado en el entorno",
+]

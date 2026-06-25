@@ -15,6 +15,71 @@ logger = logging.getLogger(__name__)
 NmapRunner = Callable[[list[str]], Awaitable[tuple[int, str, str]]]
 
 
+def _build_version(service_elem: ET.Element) -> str:
+    """Construye cadena de version a partir del elemento service de Nmap."""
+    product = service_elem.get("product", "")
+    version = service_elem.get("version", "")
+    extrainfo = service_elem.get("extrainfo", "")
+
+    parts = [part for part in (product, version, extrainfo) if part]
+    return " ".join(parts)
+
+
+def parse_nmap_xml(xml_output: str) -> list[HostFinding]:
+    """Parsea la salida XML de Nmap y retorna lista de hosts encontrados.
+
+    Funcion a nivel de modulo (picklable) para uso con ProcessPoolExecutor.
+    """
+    root = ET.fromstring(xml_output)
+    hosts: list[HostFinding] = []
+
+    for host_elem in root.findall("host"):
+        status_elem = host_elem.find("status")
+        host_status = (
+            status_elem.get("state", "unknown") if status_elem is not None else "unknown"
+        )
+
+        address = ""
+        for addr_elem in host_elem.findall("address"):
+            if addr_elem.get("addrtype") in {"ipv4", "ipv6"}:
+                address = addr_elem.get("addr", "")
+                break
+
+        ports: list[PortFinding] = []
+        ports_elem = host_elem.find("ports")
+        if ports_elem is not None:
+            for port_elem in ports_elem.findall("port"):
+                state_elem = port_elem.find("state")
+                if state_elem is None or state_elem.get("state") != "open":
+                    continue
+
+                service_elem = port_elem.find("service")
+                service_name = ""
+                version = ""
+                if service_elem is not None:
+                    service_name = service_elem.get("name", "")
+                    version = _build_version(service_elem)
+
+                ports.append(
+                    PortFinding(
+                        port=int(port_elem.get("portid", "0")),
+                        protocol=port_elem.get("protocol", "tcp"),
+                        service=service_name,
+                        version=version,
+                    )
+                )
+
+        hosts.append(
+            HostFinding(
+                address=address or "unknown",
+                status=host_status,
+                ports=ports,
+            )
+        )
+
+    return hosts
+
+
 class NmapWrapper:
     """Wrapper asíncrono de Nmap para descubrimiento de activos."""
 
@@ -125,58 +190,5 @@ class NmapWrapper:
         )
 
     def _parse_xml(self, xml_output: str) -> list[HostFinding]:
-        root = ET.fromstring(xml_output)
-        hosts: list[HostFinding] = []
-
-        for host_elem in root.findall("host"):
-            status_elem = host_elem.find("status")
-            host_status = status_elem.get("state", "unknown") if status_elem is not None else "unknown"
-
-            address = ""
-            for addr_elem in host_elem.findall("address"):
-                if addr_elem.get("addrtype") in {"ipv4", "ipv6"}:
-                    address = addr_elem.get("addr", "")
-                    break
-
-            ports: list[PortFinding] = []
-            ports_elem = host_elem.find("ports")
-            if ports_elem is not None:
-                for port_elem in ports_elem.findall("port"):
-                    state_elem = port_elem.find("state")
-                    if state_elem is None or state_elem.get("state") != "open":
-                        continue
-
-                    service_elem = port_elem.find("service")
-                    service_name = ""
-                    version = ""
-                    if service_elem is not None:
-                        service_name = service_elem.get("name", "")
-                        version = self._build_version(service_elem)
-
-                    ports.append(
-                        PortFinding(
-                            port=int(port_elem.get("portid", "0")),
-                            protocol=port_elem.get("protocol", "tcp"),
-                            service=service_name,
-                            version=version,
-                        )
-                    )
-
-            hosts.append(
-                HostFinding(
-                    address=address or "unknown",
-                    status=host_status,
-                    ports=ports,
-                )
-            )
-
-        return hosts
-
-    @staticmethod
-    def _build_version(service_elem: ET.Element) -> str:
-        product = service_elem.get("product", "")
-        version = service_elem.get("version", "")
-        extrainfo = service_elem.get("extrainfo", "")
-
-        parts = [part for part in (product, version, extrainfo) if part]
-        return " ".join(parts)
+        """Delega al parse a nivel de modulo para compatibilidad."""
+        return parse_nmap_xml(xml_output)

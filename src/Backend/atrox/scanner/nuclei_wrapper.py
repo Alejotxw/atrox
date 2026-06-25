@@ -19,6 +19,77 @@ REQUIRED_JSONL_FIELDS = ("template-id", "host", "matched-at")
 REQUIRED_INFO_FIELDS = ("name", "severity")
 
 
+def parse_nuclei_jsonl(output: str) -> list[VulnFinding]:
+    """Parsea la salida JSONL de Nuclei y retorna lista de hallazgos.
+
+    Funcion a nivel de modulo (picklable) para uso con ProcessPoolExecutor.
+    """
+    findings: list[VulnFinding] = []
+
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            logger.warning("Linea JSONL malformada omitida: %s", stripped[:100])
+            continue
+
+        if not isinstance(data, dict):
+            logger.warning("Linea JSONL no es un objeto: %s", stripped[:100])
+            continue
+
+        info = data.get("info", {})
+        if not isinstance(info, dict):
+            logger.warning("Campo 'info' invalido, linea omitida")
+            continue
+
+        template_id = data.get("template-id", "")
+        name = info.get("name", "")
+        raw_severity = info.get("severity", "")
+
+        if not template_id or not name or not raw_severity:
+            logger.warning(
+                "Campos requeridos faltantes (template-id, info.name, info.severity), linea omitida"
+            )
+            continue
+
+        host = data.get("host", "")
+        matched_at = data.get("matched-at", "")
+
+        if not host or not matched_at:
+            logger.warning(
+                "Campos requeridos faltantes (host, matched-at), linea omitida"
+            )
+            continue
+
+        try:
+            severity = VulnSeverity(raw_severity.lower())
+        except ValueError:
+            severity = VulnSeverity.UNKNOWN
+
+        findings.append(
+            VulnFinding(
+                template_id=template_id,
+                name=name,
+                severity=severity,
+                host=host,
+                matched_at=matched_at,
+                tags=info.get("tags", []),
+                description=info.get("description", ""),
+                references=info.get("reference", []),
+                extracted_results=data.get("extracted-results", []),
+                scan_type=data.get("type", ""),
+                ip=data.get("ip", ""),
+                timestamp=data.get("timestamp", ""),
+            )
+        )
+
+    return findings
+
+
 class NucleiWrapper:
     """Wrapper asincrono de Nuclei para escaneo de vulnerabilidades."""
 
@@ -132,70 +203,8 @@ class NucleiWrapper:
         )
 
     def _parse_jsonl(self, output: str) -> list[VulnFinding]:
-        findings: list[VulnFinding] = []
-
-        for line in output.splitlines():
-            stripped = line.strip()
-            if not stripped:
-                continue
-
-            try:
-                data = json.loads(stripped)
-            except json.JSONDecodeError:
-                logger.warning("Linea JSONL malformada omitida: %s", stripped[:100])
-                continue
-
-            if not isinstance(data, dict):
-                logger.warning("Linea JSONL no es un objeto: %s", stripped[:100])
-                continue
-
-            info = data.get("info", {})
-            if not isinstance(info, dict):
-                logger.warning("Campo 'info' invalido, linea omitida")
-                continue
-
-            template_id = data.get("template-id", "")
-            name = info.get("name", "")
-            raw_severity = info.get("severity", "")
-
-            if not template_id or not name or not raw_severity:
-                logger.warning(
-                    "Campos requeridos faltantes (template-id, info.name, info.severity), linea omitida"
-                )
-                continue
-
-            host = data.get("host", "")
-            matched_at = data.get("matched-at", "")
-
-            if not host or not matched_at:
-                logger.warning(
-                    "Campos requeridos faltantes (host, matched-at), linea omitida"
-                )
-                continue
-
-            try:
-                severity = VulnSeverity(raw_severity.lower())
-            except ValueError:
-                severity = VulnSeverity.UNKNOWN
-
-            findings.append(
-                VulnFinding(
-                    template_id=template_id,
-                    name=name,
-                    severity=severity,
-                    host=host,
-                    matched_at=matched_at,
-                    tags=info.get("tags", []),
-                    description=info.get("description", ""),
-                    references=info.get("reference", []),
-                    extracted_results=data.get("extracted-results", []),
-                    scan_type=data.get("type", ""),
-                    ip=data.get("ip", ""),
-                    timestamp=data.get("timestamp", ""),
-                )
-            )
-
-        return findings
+        """Delega al parse a nivel de modulo para compatibilidad."""
+        return parse_nuclei_jsonl(output)
 
     def _resolve_templates(self, template_names: list[str]) -> list[str]:
         if not self.sandbox_templates:

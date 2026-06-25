@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     nuclei_timeout_seconds: int = 300
     nuclei_sandbox_templates: str | None = None
 
+    # Cola de trabajos (HU-004)
+    max_concurrent_scans: int = 10
+    queue_max_size: int = 50
+    parse_workers: int = 2
+
 
 @lru_cache
 def get_settings() -> Settings:

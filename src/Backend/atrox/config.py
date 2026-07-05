@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     queue_max_size: int = 50
     parse_workers: int = 2
 
+    # Cifrado en reposo (HU-007 / ADR-003) — nunca commitear la llave real
+    encryption_master_key: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

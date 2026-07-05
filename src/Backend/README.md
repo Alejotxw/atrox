@@ -168,6 +168,47 @@ encrypted_finding = encryptor.encrypt_fields("finding", {
 
 Documentación de rotación de llaves: [`docs/security/key_rotation.md`](docs/security/key_rotation.md)
 
+### 8. Log de auditoría inmutable (HU-008)
+
+Cada escaneo y cambio de política queda registrado con **timestamp, usuario, acción y recurso**, firmado con **HMAC-SHA256**.
+
+**Generar llave de firma** (nunca commitear):
+
+```bash
+python -c "from atrox.security.audit_signer import generate_signing_key; print(generate_signing_key())"
+```
+
+Configurar en `.env`:
+
+```
+ATROX_AUDIT_SIGNING_KEY=<valor-generado>
+ATROX_AUDIT_RETENTION_DAYS=365
+```
+
+**Registrar evento (cambio de política):**
+
+```powershell
+Invoke-RestMethod -Method POST -Uri http://localhost:8000/api/audit/events `
+  -ContentType "application/json" `
+  -Body '{"user":"director.ti","action":"policy.updated","resource":"policy:scheduling","metadata":{"cron":"0 2 * * *"}}'
+```
+
+**Consultar logs por rango de fechas:**
+
+```
+GET /api/audit/logs?from=2026-06-01T00:00:00Z&to=2026-06-30T23:59:59Z&user=director.ti
+```
+
+**Verificar integridad (tamper detection):**
+
+```
+GET /api/audit/integrity
+```
+
+Los escaneos enviados vía `POST /api/jobs` se registran automáticamente como `scan.submitted`.
+
+Documentación de retención: [`docs/security/audit_retention.md`](docs/security/audit_retention.md)
+
 ## Pruebas
 
 ```bash
@@ -213,5 +254,6 @@ src/Backend/
 - **HU-001** — Bootstrap del núcleo FastAPI asíncrono
 - **HU-002** — Descubrimiento de activos con wrapper Nmap (RF-001)
 - **HU-007** — Cifrado AES-256-GCM de datos en reposo (RNF-001 · ADR-003)
+- **HU-008** — Log de auditoría inmutable con firma criptográfica (RNF-003 · ADR-003)
 - **ADR-001** — Lenguaje base y concurrencia
 - **ADR-003** — Almacenamiento seguro de auditoría

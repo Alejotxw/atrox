@@ -7,6 +7,7 @@ from atrox.api.audit import router as audit_router
 from atrox.api.discovery import router as discovery_router
 from atrox.api.health import router as health_router
 from atrox.api.jobs import router as jobs_router
+from atrox.api.vectors import router as vectors_router
 from atrox.api.vulnscan import router as vulnscan_router
 from atrox.config import get_settings
 from atrox.queue.models import Job, JobType
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     application.include_router(vulnscan_router)
     application.include_router(jobs_router)
     application.include_router(audit_router)
+    application.include_router(vectors_router)
     return application
 
 

@@ -235,6 +235,20 @@ print(result["stop_reason"], result["executed_tools"])
 pytest tests/test_ai_graph.py -v
 ```
 
+### 10. Análisis de vectores de ataque (HU-014)
+
+Correlaciona hallazgos de Nuclei (HU-003) y propone cadenas de ataque priorizadas.
+
+```powershell
+Invoke-RestMethod -Method POST -Uri http://localhost:8000/api/ai/vectors/analyze `
+  -ContentType "application/json" `
+  -Body '{"findings":[{"template_id":"sqli-login-blind","name":"SQL Injection","severity":"critical","host":"http://lab.local","matched_at":"http://lab.local/login.php","tags":["sqli","web"],"ip":"192.168.1.10"},{"template_id":"mysql-default-credentials","name":"MySQL Default Creds","severity":"high","host":"mysql://192.168.1.10:3306","matched_at":"192.168.1.10:3306","tags":["mysql","database"],"ip":"192.168.1.10"}]}'
+```
+
+```bash
+pytest tests/test_vector_analyzer.py -v
+```
+
 ## Pruebas
 
 ```bash
@@ -282,6 +296,7 @@ src/Backend/
 - **HU-007** — Cifrado AES-256-GCM de datos en reposo (RNF-001 · ADR-003)
 - **HU-008** — Log de auditoría inmutable con firma criptográfica (RNF-003 · ADR-003)
 - **HU-013** — Orquestación de agentes con LangGraph (RF-003 · ADR-002)
+- **HU-014** — Agente de análisis de vectores de ataque (RF-003 · RNF-004)
 - **ADR-001** — Lenguaje base y concurrencia
 - **ADR-002** — Estrategia de integración IA
 - **ADR-003** — Almacenamiento seguro de auditoría

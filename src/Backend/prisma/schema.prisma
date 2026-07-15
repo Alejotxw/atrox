@@ -1,0 +1,72 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Scan {
+  id         String   @id @default(uuid())
+  target     String
+  status     String
+
+  startedAt  DateTime
+  finishedAt DateTime?
+
+  assets     Asset[]
+  reports    Report[]
+}
+
+model Asset {
+  id       String @id @default(uuid())
+
+  ip       String
+  hostname String?
+  os       String?
+
+  scanId   String
+  scan     Scan @relation(fields: [scanId], references: [id])
+
+  findings Finding[]
+
+  @@index([scanId])
+}
+
+model Finding {
+  id          String @id @default(uuid())
+
+  cveId       String?
+  severity    String
+  description String
+
+  assetId     String
+  asset       Asset @relation(fields: [assetId], references: [id])
+
+  @@index([assetId])
+  @@index([cveId])
+}
+
+model Report {
+  id          String   @id @default(uuid())
+  filePath    String
+
+  generatedAt DateTime @default(now())
+
+  scanId      String
+  scan        Scan @relation(fields: [scanId], references: [id])
+}
+
+model Cve {
+  cveId       String   @id
+  cvss        Float?
+  description String
+  published   String
+  modified    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([cveId])
+}

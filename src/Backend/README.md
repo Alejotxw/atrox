@@ -140,33 +140,51 @@ Estados posibles: `completed`, `unreachable`, `timeout`, `error`.
 
 Reportes, credenciales y hallazgos sensibles se cifran con **AES-256-GCM** antes de persistirse.
 
-**Generar llave maestra** (nunca commitear el resultado):
+#### Cómo activarlo (compañeros del equipo)
 
-```bash
+**1. Copia el archivo de entorno** (si aún no tienes `.env`):
+
+```powershell
+cd C:\Users\Usuario\atrox\src\Backend
+copy .env.example .env
+```
+
+**2. Activa el entorno virtual y genera la llave:**
+
+```powershell
+cd C:\Users\Usuario\atrox\src\Backend
+.\.venv\Scripts\Activate.ps1
 python -c "from atrox.security.encryption import generate_master_key; print(generate_master_key())"
 ```
 
-Exportar en el entorno:
+**3. Pega la llave en tu `.env`** (descomenta y completa):
 
-```bash
-export ATROX_ENCRYPTION_MASTER_KEY="<valor-generado>"
+```env
+ATROX_ENCRYPTION_MASTER_KEY=pega_aqui_la_llave_generada
+ATROX_ENCRYPTED_STORAGE_PATH=data/encrypted
 ```
 
-Uso programático:
+**4. Reinicia el backend:**
 
-```python
-from atrox.security import SensitiveFieldEncryptor, get_encryption_service_from_settings
-
-svc = get_encryption_service_from_settings()
-encryptor = SensitiveFieldEncryptor(svc)
-
-encrypted_finding = encryptor.encrypt_fields("finding", {
-    "id": "VULN-001",
-    "evidence": "PoC SQLi en /login.php",
-})
+```powershell
+python -m atrox
 ```
+
+> **Importante:** nunca subas el archivo `.env` ni la llave real a Git. Cada persona genera su propia llave local.
 
 Documentación de rotación de llaves: [`docs/security/key_rotation.md`](docs/security/key_rotation.md)
+
+**Integración (endpoints + jobs + persistencia):**
+
+| Recurso | Endpoint | Qué cifra |
+| :--- | :--- | :--- |
+| Hallazgos | `POST/GET /api/findings` | description, evidence, poc, raw_output |
+| Credenciales | `POST/GET /api/credentials` | password, secret, token, private_key |
+| Reportes | `POST/GET /api/reports` | content, executive_summary, technical_details, body |
+
+- Al completar un job `vulnscan`, los hallazgos se **persisten cifrados** y el `job.result` guarda findings cifrados.
+- Al consultar `GET /api/jobs/{id}`, los findings se **descifran** para la respuesta autorizada.
+- Los archivos en `data/encrypted/*.jsonl` nunca guardan esos campos en texto plano.
 
 ### 8. Log de auditoría inmutable (HU-008)
 

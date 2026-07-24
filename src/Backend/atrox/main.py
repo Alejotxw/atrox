@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from atrox.api.audit import router as audit_router
 from atrox.api.discovery import router as discovery_router
 from atrox.api.health import router as health_router
 from atrox.api.jobs import router as jobs_router
@@ -12,6 +13,7 @@ from atrox.queue.models import Job, JobType
 from atrox.queue.service import JobQueue
 from atrox.scanner.nmap_wrapper import NmapWrapper
 from atrox.scanner.nuclei_wrapper import NucleiWrapper
+from atrox.security.audit_deps import build_audit_log_service
 
 
 async def _dispatch_scan(job: Job) -> dict:
@@ -55,6 +57,12 @@ async def lifespan(app: FastAPI):
     executor = ProcessPoolExecutor(max_workers=settings.parse_workers)
     await job_queue.start(scanner=_dispatch_scan, executor=executor)
 
+    app.state.audit_log = None
+    if settings.audit_signing_key:
+        audit_log = build_audit_log_service()
+        await audit_log.purge_expired()
+        app.state.audit_log = audit_log
+
     yield
 
     await job_queue.shutdown()
@@ -71,6 +79,7 @@ def create_app() -> FastAPI:
     application.include_router(discovery_router)
     application.include_router(vulnscan_router)
     application.include_router(jobs_router)
+    application.include_router(audit_router)
     return application
 
 

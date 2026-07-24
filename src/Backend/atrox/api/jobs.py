@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, Request
 from pydantic import BaseModel, Field, field_validator
 
 from atrox.queue.models import Job, JobType, QueueMetrics
@@ -51,7 +51,9 @@ def get_job_queue(request: Request) -> JobQueue:
 @router.post("", status_code=202, response_model=JobSubmitResponse)
 async def submit_job(
     body: JobSubmitRequest,
+    request: Request,
     queue: JobQueue = Depends(get_job_queue),
+    x_atrox_user: str | None = Header(default=None, alias="X-Atrox-User"),
 ) -> JobSubmitResponse:
     """Envia un trabajo de escaneo a la cola. Retorna 202 Accepted."""
     try:
@@ -61,6 +63,16 @@ async def submit_job(
         )
     except QueueFullError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+    audit_log = getattr(request.app.state, "audit_log", None)
+    if audit_log is not None:
+        await audit_log.record(
+            user=x_atrox_user or "system",
+            action="scan.submitted",
+            resource=f"job:{job.id}",
+            metadata={"type": body.type.value, "target": body.target},
+        )
+
     return JobSubmitResponse(job_id=job.id, status=job.status.value)
 
 

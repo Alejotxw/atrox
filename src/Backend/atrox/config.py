@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     queue_max_size: int = 50
     parse_workers: int = 2
 
+    # Cifrado en reposo (HU-007 / ADR-003) — nunca commitear la llave real
+    encryption_master_key: str | None = None
+
+    # Log de auditoría inmutable (HU-008 / ADR-003)
+    audit_signing_key: str | None = None
+    audit_log_path: str = "data/audit.log"
+    audit_retention_days: int = 365
+
 
 @lru_cache
 def get_settings() -> Settings:

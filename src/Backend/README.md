@@ -209,6 +209,32 @@ Los escaneos enviados vía `POST /api/jobs` se registran automáticamente como `
 
 Documentación de retención: [`docs/security/audit_retention.md`](docs/security/audit_retention.md)
 
+### 9. Orquestación IA con LangGraph (HU-013)
+
+Grafo de estados que replica el razonamiento de un pentester:
+
+```
+analizar hallazgos → proponer acción → ejecutar herramienta → evaluar → (ciclo o parada)
+```
+
+Diagrama de flujo: [`docs/ai/pentest_orchestrator_flow.md`](../../docs/ai/pentest_orchestrator_flow.md)
+
+```python
+from atrox.ai.graph import run_pentest_orchestrator, MockDecider
+
+result = run_pentest_orchestrator(
+    findings=[{"id": "VULN-001", "severity": "critical", "name": "SQLi"}],
+    target="lab.target.local",
+    thread_id="demo-session",
+    decider=MockDecider(stop_after_cycles=1),
+)
+print(result["stop_reason"], result["executed_tools"])
+```
+
+```bash
+pytest tests/test_ai_graph.py -v
+```
+
 ## Pruebas
 
 ```bash
@@ -255,5 +281,7 @@ src/Backend/
 - **HU-002** — Descubrimiento de activos con wrapper Nmap (RF-001)
 - **HU-007** — Cifrado AES-256-GCM de datos en reposo (RNF-001 · ADR-003)
 - **HU-008** — Log de auditoría inmutable con firma criptográfica (RNF-003 · ADR-003)
+- **HU-013** — Orquestación de agentes con LangGraph (RF-003 · ADR-002)
 - **ADR-001** — Lenguaje base y concurrencia
+- **ADR-002** — Estrategia de integración IA
 - **ADR-003** — Almacenamiento seguro de auditoría

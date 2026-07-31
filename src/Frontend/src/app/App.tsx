@@ -25,7 +25,8 @@ import {
   ChevronRight,
   Zap,
   Target,
-  Terminal
+  Terminal,
+  ListFilter
 } from 'lucide-react';
 import FindingsManagementView from './components/findings/FindingsManagementView';
 import {
@@ -315,6 +316,7 @@ export default function App() {
             <NavItem icon={<Network />} label="Reconocimiento (Nmap)" active={activeTab === 'Reconocimiento (Nmap)'} onClick={() => setActiveTab('Reconocimiento (Nmap)')} />
             <NavItem icon={<ScanLine />} label="Escaneo (Nuclei/SQLMap)" active={activeTab === 'Escaneo (Nuclei/SQLMap)'} onClick={() => setActiveTab('Escaneo (Nuclei/SQLMap)')} />
             <NavItem icon={<ShieldCheck />} label="Validación (Metasploit)" active={activeTab === 'Validación (Metasploit)'} onClick={() => setActiveTab('Validación (Metasploit)')} />
+            <NavItem icon={<ListFilter />} label="Gestión de Hallazgos" active={activeTab === 'Gestión de Hallazgos'} onClick={() => setActiveTab('Gestión de Hallazgos')} />
             <NavItem icon={<Cpu />} label="Motor Ollama IA" badge="Llama 3" active={activeTab === 'Motor Ollama IA'} onClick={() => setActiveTab('Motor Ollama IA')} />
             <NavItem icon={<History />} label="Historial SQLite" active={activeTab === 'Historial SQLite'} onClick={() => setActiveTab('Historial SQLite')} />
           </nav>
@@ -589,6 +591,7 @@ export default function App() {
             {activeTab === 'Reconocimiento (Nmap)' && <ReconView targetUrl={targetUrl} />}
             {activeTab === 'Escaneo (Nuclei/SQLMap)' && <ScanView targetUrl={targetUrl} />}
             {activeTab === 'Validación (Metasploit)' && <MetasploitView targetUrl={targetUrl} />}
+            {activeTab === 'Gestión de Hallazgos' && <FindingsManagementView />}
             {activeTab === 'Motor Ollama IA' && <OllamaView />}
             {activeTab === 'Historial SQLite' && <HistoryView />}
             

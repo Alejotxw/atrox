@@ -1,17 +1,28 @@
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from atrox.api.audit import router as audit_router
 from atrox.api.discovery import router as discovery_router
 from atrox.api.health import router as health_router
 from atrox.api.jobs import router as jobs_router
+from atrox.api.payloads import router as payloads_router
+from atrox.api.scans import router as scans_router
+from atrox.api.scoring import router as scoring_router
+from atrox.api.vectors import router as vectors_router
 from atrox.api.vulnscan import router as vulnscan_router
 from atrox.config import get_settings
+from atrox.findings.store import FalsePositiveStore
 from atrox.queue.models import Job, JobType
 from atrox.queue.service import JobQueue
 from atrox.scanner.nmap_wrapper import NmapWrapper
 from atrox.scanner.nuclei_wrapper import NucleiWrapper
+from atrox.security.audit_deps import build_audit_log_service
+from atrox.security.deps import get_encryption_service_from_settings
+from atrox.security.sensitive_fields import SensitiveFieldEncryptor
 
 
 async def _dispatch_scan(job: Job) -> dict:
@@ -55,6 +66,20 @@ async def lifespan(app: FastAPI):
     executor = ProcessPoolExecutor(max_workers=settings.parse_workers)
     await job_queue.start(scanner=_dispatch_scan, executor=executor)
 
+    app.state.audit_log = None
+    if settings.audit_signing_key:
+        audit_log = build_audit_log_service()
+        await audit_log.purge_expired()
+        app.state.audit_log = audit_log
+
+    fp_encryptor = None
+    if settings.encryption_master_key:
+        fp_encryptor = SensitiveFieldEncryptor(get_encryption_service_from_settings())
+    app.state.false_positive_store = FalsePositiveStore(
+        store_path=Path(settings.false_positive_store_path),
+        encryptor=fp_encryptor,
+    )
+
     yield
 
     await job_queue.shutdown()
@@ -67,10 +92,22 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     application.include_router(health_router)
     application.include_router(discovery_router)
     application.include_router(vulnscan_router)
     application.include_router(jobs_router)
+    application.include_router(scans_router)
+    application.include_router(audit_router)
+    application.include_router(vectors_router)
+    application.include_router(payloads_router)
+    application.include_router(scoring_router)
     return application
 
 

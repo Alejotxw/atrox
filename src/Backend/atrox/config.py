@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     audit_log_path: str = "data/audit.log"
     audit_retention_days: int = 365
 
+    # Scoring de confianza / falsos positivos (HU-016 / RF-005)
+    fp_score_threshold: int = 40
+
 
 @lru_cache
 def get_settings() -> Settings:

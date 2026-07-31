@@ -459,6 +459,41 @@ Si `ATROX_ENCRYPTION_MASTER_KEY` está configurada, los campos sensibles del `fi
 pytest tests/test_false_positive_store.py tests/test_false_positive_api.py tests/test_false_positive_e2e_flow.py -v
 ```
 
+### 16. Sincronización diaria de base de amenazas NVD (HU-005)
+
+`atrox/threat_intel/` consume la API NVD CVE 2.0 para mantener indexado el catálogo de CVEs usado en correlación de hallazgos (RF-010). Persiste **CVE-ID, CVSS (score + severidad + vector), descripción y fechas** (publicado / última modificación) en `data/threat_intel/cves.jsonl` y el log de la última sincronización en `data/threat_intel/last_sync.json`.
+
+**Scheduler diario:** la lifespan de la app arranca `NvdSyncService.run_daily()` (intervalo `ATROX_NVD_SYNC_INTERVAL_HOURS`, default `24`). El bucle duerme primero: el arranque no hace llamadas de red; la primera sincronización se dispara manualmente (CLI o API). Con `ATROX_NVD_SYNC_ON_STARTUP=true` se sincroniza también al arrancar.
+
+**Ejecución manual (CLI):**
+```bash
+python -m atrox.threat_intel          # delta desde la última sincronización
+python -m atrox.threat_intel --force-full  # descarga todo el catálogo
+atrox-nvd-sync                        # equivalente (console script)
+```
+
+**Ejecución manual (API):**
+```bash
+curl -X POST "http://localhost:8000/api/threats/sync?force_full=false"
+```
+
+**Log de última sincronización consultable:**
+```
+GET /api/threats/last-sync
+```
+
+**Catálogo indexado (correlación de hallazgos):**
+```
+GET /api/threats/cves?severity=CRITICAL&q=log4j&page=1&page_size=20
+GET /api/threats/cves/CVE-2021-44228
+```
+
+Los **errores de red** se registran en el estado de sincronización (`last_error`) sin propagarse: un fallo de NVD jamás interrumpe la cola de escaneos activos, y la última sincronización exitosa se conserva para el siguiente delta. Una sincronización en curso responde `409` si se dispara otra (manual o programada).
+
+```bash
+pytest tests/test_nvd_client.py tests/test_cve_store.py tests/test_threat_intel_service.py tests/test_threats_api.py -v
+```
+
 ## Pruebas
 
 ```bash
@@ -480,7 +515,13 @@ src/Backend/
 ├── atrox/
 │   ├── api/
 │   │   ├── health.py       # GET /health
-│   │   └── discovery.py    # POST /api/discovery/scan
+│   │   ├── discovery.py    # POST /api/discovery/scan
+│   │   └── threats.py      # /api/threats (NVD, HU-005)
+│   ├── threat_intel/
+│   │   ├── nvd_client.py   # Cliente asíncrono API NVD 2.0
+│   │   ├── cve_store.py    # Catálogo JSONL + estado de última sync
+│   │   ├── service.py      # NvdSyncService + scheduler diario
+│   │   └── __main__.py     # CLI: python -m atrox.threat_intel
 │   ├── scanner/
 │   │   ├── nmap_wrapper.py
 │   │   └── ...
@@ -512,6 +553,7 @@ src/Backend/
 - **HU-015** — Agente de generación de payloads contextualizados, `POST /api/ai/payloads/generate` (RF-004 · RNF-004)
 - **HU-016** — Scoring de confianza para falsos positivos, `POST /api/ai/scoring/score` (RF-005 · RNF-004)
 - **HU-022** — Marcado manual de falsos positivos, `POST /api/scans/{id}/findings/false-positive` (RF-006)
+- **HU-005** — Sincronización diaria de base de amenazas, `atrox/threat_intel/` (RF-010)
 - **ADR-001** — Lenguaje base y concurrencia
 - **ADR-002** — Estrategia de integración IA
 - **ADR-003** — Almacenamiento seguro de auditoría

@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     # Marcado manual de falsos positivos (HU-022)
     false_positive_store_path: str = "data/false_positives.jsonl"
 
+    # Sincronización diaria de base de amenazas NVD (HU-005 / RF-010)
+    nvd_api_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    nvd_api_key: str | None = None
+    nvd_request_timeout_seconds: int = 30
+    nvd_sync_interval_hours: int = 24
+    nvd_sync_enabled: bool = True
+    nvd_sync_on_startup: bool = False
+    nvd_store_path: str = "data/threat_intel/cves.jsonl"
+    nvd_sync_status_path: str = "data/threat_intel/last_sync.json"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,0 +1,75 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  backend:
+    name: Backend - Migraciones, Pruebas de Integración
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: src/Backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: src/Backend/package-lock.json
+
+      - name: Instalación de dependencias
+        run: npm ci
+
+      - name: Generación del cliente Prisma
+        run: npx prisma generate
+
+      - name: Aplicación de migraciones versionadas (CI)
+        env:
+          DATABASE_URL: file:./ci.db
+        run: npx prisma migrate deploy
+
+      - name: Ejecución de pruebas de integración (HU-006)
+        run: npm test
+
+  frontend:
+    name: Frontend - Lint y Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: src/Frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: src/Frontend/package-lock.json
+
+      - name: Instalación de dependencias
+        run: npm ci
+
+      - name: Análisis de código
+        run: npm run lint
+
+      - name: Construcción
+        run: npm run build
+
+      - name: Subir artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: src/Frontend/dist/

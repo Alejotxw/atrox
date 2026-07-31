@@ -332,6 +332,47 @@ Para escaneos `discovery`, `assets` trae los `HostFinding` descubiertos (filtrab
 pytest tests/test_scans_detail_api.py -v
 ```
 
+### 13. Agente de generación de payloads contextualizados (HU-015)
+
+`POST /api/ai/payloads/generate` — catálogo heurístico (sin LLM conectado, sin ejecución de red/subprocesos) que sugiere payloads adaptados a la categoría de vulnerabilidad (sqli/xss/rce/lfi/ssrf/default-login) y servicio inferidos de un `VulnFinding` de HU-003/HU-006, asociados a un `finding_id`. Revisión de seguridad documentada en [`docs/ADR/ADR-004 Seguridad_Agente_Generacion_Payloads.md`](../../docs/ADR/ADR-004%20Seguridad_Agente_Generacion_Payloads.md).
+
+```bash
+curl -X POST http://localhost:8000/api/ai/payloads/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "finding": {
+      "template_id": "generic-sqli-detect",
+      "name": "SQL Injection Detected",
+      "severity": "high",
+      "host": "http://example.com",
+      "matched_at": "http://example.com/login?id=1",
+      "tags": ["sqli", "injection"]
+    }
+  }'
+```
+
+Respuesta (ejemplo):
+
+```json
+{
+  "finding_id": "generic-sqli-detect",
+  "service": "http",
+  "category": "sqli",
+  "suggestions": [
+    {"category": "sqli", "payload": "' OR '1'='1' -- -", "description": "Bypass de autenticación / condición siempre verdadera"}
+  ],
+  "disclaimer": "Uso exclusivo en entornos de laboratorio autorizados. ...",
+  "generation_time_ms": 0.12,
+  "within_sla": true
+}
+```
+
+`disclaimer` siempre está presente en el contrato (no es opcional): el consumidor de la API no puede recibir payloads sin la advertencia de uso autorizado.
+
+```bash
+pytest tests/test_payload_generator.py tests/test_payloads_api.py tests/test_payloads_contract.py -v
+```
+
 ## Pruebas
 
 ```bash
@@ -382,6 +423,7 @@ src/Backend/
 - **HU-014** — Agente de análisis de vectores de ataque (RF-003 · RNF-004)
 - **HU-009** — API REST unificada de creación de escaneos, `POST /api/scans` (RF-001 · RF-002)
 - **HU-010** — API REST de consulta de resultados, `GET /api/scans/{id}` (RF-001 · RF-002)
+- **HU-015** — Agente de generación de payloads contextualizados, `POST /api/ai/payloads/generate` (RF-004 · RNF-004)
 - **ADR-001** — Lenguaje base y concurrencia
 - **ADR-002** — Estrategia de integración IA
 - **ADR-003** — Almacenamiento seguro de auditoría

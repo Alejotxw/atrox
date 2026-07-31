@@ -294,6 +294,44 @@ El contrato queda publicado automáticamente en el schema OpenAPI (`GET /openapi
 pytest tests/test_scans_api.py tests/test_scans_contract.py -v
 ```
 
+### 12. Consulta de resultados de escaneo (HU-010)
+
+`GET /api/scans/{scan_id}` — vista de analista sobre el mismo `Job` de HU-004: progreso, activos descubiertos (`discovery`) o hallazgos paginados (`vulnscan`), filtrables por `severity` y `asset_status`. Coherente en cualquier estado: si el escaneo aún no terminó, `assets`/`findings` se devuelven vacíos en lugar de fallar.
+
+```bash
+curl "http://localhost:8000/api/scans/<scan_id>?page=1&page_size=20&severity=high"
+```
+
+Respuesta (ejemplo, escaneo `vulnscan` terminado):
+
+```json
+{
+  "scan_id": "b3f1...",
+  "scan_type": "vulnscan",
+  "status": "done",
+  "progress": 1.0,
+  "target": "example.com",
+  "assets": [],
+  "findings": {
+    "items": [{"template_id": "...", "severity": "high", "...": "..."}],
+    "total": 42,
+    "page": 1,
+    "page_size": 20,
+    "total_pages": 3
+  },
+  "error": null,
+  "created_at": "...",
+  "started_at": "...",
+  "finished_at": "..."
+}
+```
+
+Para escaneos `discovery`, `assets` trae los `HostFinding` descubiertos (filtrables por `asset_status=up|down`) y `findings` queda vacío.
+
+```bash
+pytest tests/test_scans_detail_api.py -v
+```
+
 ## Pruebas
 
 ```bash
@@ -343,6 +381,7 @@ src/Backend/
 - **HU-013** — Orquestación de agentes con LangGraph (RF-003 · ADR-002)
 - **HU-014** — Agente de análisis de vectores de ataque (RF-003 · RNF-004)
 - **HU-009** — API REST unificada de creación de escaneos, `POST /api/scans` (RF-001 · RF-002)
+- **HU-010** — API REST de consulta de resultados, `GET /api/scans/{id}` (RF-001 · RF-002)
 - **ADR-001** — Lenguaje base y concurrencia
 - **ADR-002** — Estrategia de integración IA
 - **ADR-003** — Almacenamiento seguro de auditoría

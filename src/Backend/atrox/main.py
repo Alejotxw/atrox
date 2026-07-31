@@ -21,23 +21,23 @@ async def _dispatch_scan(job: Job) -> dict:
     if job.job_type == JobType.DISCOVERY:
         wrapper = NmapWrapper(
             nmap_path=settings.nmap_path,
-            timeout=settings.nmap_timeout_seconds,
+            timeout_seconds=settings.nmap_timeout_seconds,
         )
         result = await wrapper.scan(
             target=job.params["target"],
-            port_range=job.params.get("port_range"),
+            port_range=job.params.get("port_range", "1-1024"),
         )
         return result.model_dump()
 
     # JobType.VULNSCAN
     wrapper_nuclei = NucleiWrapper(
         nuclei_path=settings.nuclei_path,
-        timeout=settings.nuclei_timeout_seconds,
+        timeout_seconds=settings.nuclei_timeout_seconds,
     )
     result = await wrapper_nuclei.scan(
         target=job.params["target"],
         templates=job.params.get("templates"),
-        severity=job.params.get("severity"),
+        severities=job.params.get("severities"),
     )
     return result.model_dump()
 

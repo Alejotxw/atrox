@@ -267,6 +267,33 @@ Invoke-RestMethod -Method POST -Uri http://localhost:8000/api/ai/vectors/analyze
 pytest tests/test_vector_analyzer.py -v
 ```
 
+### 11. API REST unificada de escaneos (HU-009)
+
+Fachada pública sobre la cola de HU-004: valida el payload y encola el trabajo automáticamente.
+
+```powershell
+Invoke-RestMethod -Method POST -Uri http://localhost:8000/api/scans `
+  -ContentType "application/json" `
+  -Body '{"target":"scanme.nmap.org","scan_type":"discovery","params":{"port_range":"22,80"}}'
+```
+
+Respuesta esperada (`202 Accepted`):
+
+```json
+{
+  "scan_id": "b3f1...",
+  "status": "pending"
+}
+```
+
+`scan_id` es el mismo identificador que `job_id` en HU-004, por lo que el estado del escaneo puede consultarse con `GET /api/jobs/{scan_id}`.
+
+El contrato queda publicado automáticamente en el schema OpenAPI (`GET /openapi.json`, UI en `/docs`) y validado por `tests/test_scans_contract.py` en CI.
+
+```bash
+pytest tests/test_scans_api.py tests/test_scans_contract.py -v
+```
+
 ## Pruebas
 
 ```bash
@@ -315,6 +342,7 @@ src/Backend/
 - **HU-008** — Log de auditoría inmutable con firma criptográfica (RNF-003 · ADR-003)
 - **HU-013** — Orquestación de agentes con LangGraph (RF-003 · ADR-002)
 - **HU-014** — Agente de análisis de vectores de ataque (RF-003 · RNF-004)
+- **HU-009** — API REST unificada de creación de escaneos, `POST /api/scans` (RF-001 · RF-002)
 - **ADR-001** — Lenguaje base y concurrencia
 - **ADR-002** — Estrategia de integración IA
 - **ADR-003** — Almacenamiento seguro de auditoría

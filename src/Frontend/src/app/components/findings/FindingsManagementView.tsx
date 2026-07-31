@@ -1,10 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronRight, Loader2, ShieldQuestion } from 'lucide-react';
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  ShieldOff,
+  ShieldQuestion,
+} from 'lucide-react';
 
 import {
   ApiError,
   analyzeVectors,
   getScanDetail,
+  markFalsePositive,
   scoreFinding,
   type AttackVector,
   type ConfidenceScoreResult,
@@ -71,6 +79,12 @@ function severityBadgeVariant(
 
 const PAGE_SIZE = VECTORS_BATCH_SIZE;
 
+// No hay login/autenticación en el frontend todavía (ver App.tsx: el
+// sidebar muestra "Admin SecOps" hardcodeado como usuario de sesión). Se
+// reutiliza el mismo valor como X-Atrox-User al marcar falsos positivos en
+// vez de introducir un flujo de identidad nuevo, fuera del alcance de HU-022.
+const CURRENT_USER = 'Admin SecOps';
+
 export default function FindingsManagementView() {
   const [scanIdInput, setScanIdInput] = useState('');
   const [scanId, setScanId] = useState<string | null>(null);
@@ -85,6 +99,8 @@ export default function FindingsManagementView() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [markingIds, setMarkingIds] = useState<Set<string>>(new Set());
+  const [markError, setMarkError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!scanId) return;
@@ -164,6 +180,47 @@ export default function FindingsManagementView() {
       else next.add(id);
       return next;
     });
+  }
+
+  async function handleMarkFalsePositive(row: FindingRow) {
+    if (!scanId) return;
+
+    setMarkingIds((prev) => new Set(prev).add(row.findingId));
+    setMarkError(null);
+
+    try {
+      await markFalsePositive(scanId, row.finding, {
+        findingId: row.findingId,
+        user: CURRENT_USER,
+      });
+
+      // HU-010 ya excluye por defecto los hallazgos marcados; retiramos la
+      // fila localmente en vez de refetchear toda la página + re-evaluar
+      // score/vector de los hallazgos restantes.
+      setScanDetail((prev) => {
+        if (!prev) return prev;
+        const items = prev.findings.items.filter((f) => f.template_id !== row.findingId);
+        return {
+          ...prev,
+          findings: {
+            ...prev.findings,
+            items,
+            total: Math.max(0, prev.findings.total - 1),
+          },
+        };
+      });
+      setScores((prev) => prev.filter((s) => s.finding_id !== row.findingId));
+    } catch (err) {
+      setMarkError(
+        err instanceof ApiError ? err.message : 'No se pudo marcar el hallazgo como falso positivo.',
+      );
+    } finally {
+      setMarkingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(row.findingId);
+        return next;
+      });
+    }
   }
 
   return (
@@ -265,6 +322,16 @@ export default function FindingsManagementView() {
         </div>
       )}
 
+      {markError && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 bg-destructive/10 border border-destructive/30 text-destructive rounded-lg p-4 text-sm"
+        >
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          {markError}
+        </div>
+      )}
+
       {!scanId && !error && (
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground border border-dashed border-border rounded-xl">
           <ShieldQuestion className="w-8 h-8 mb-3 opacity-50" />
@@ -310,6 +377,8 @@ export default function FindingsManagementView() {
                     row={row}
                     expanded={expandedIds.has(row.findingId)}
                     onToggle={() => toggleExpanded(row.findingId)}
+                    marking={markingIds.has(row.findingId)}
+                    onMarkFalsePositive={() => handleMarkFalsePositive(row)}
                   />
                 ))}
             </TableBody>
@@ -351,10 +420,14 @@ function FindingRowGroup({
   row,
   expanded,
   onToggle,
+  marking,
+  onMarkFalsePositive,
 }: {
   row: FindingRow;
   expanded: boolean;
   onToggle: () => void;
+  marking: boolean;
+  onMarkFalsePositive: () => void;
 }) {
   const { finding, score, vector } = row;
   const estado = deriveEstado(score);
@@ -451,6 +524,23 @@ function FindingRowGroup({
                   </ol>
                 </div>
               )}
+
+              <div className="pt-2 border-t border-border">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={marking}
+                  onClick={onMarkFalsePositive}
+                  className="text-destructive hover:text-destructive"
+                >
+                  {marking ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <ShieldOff className="w-3.5 h-3.5" />
+                  )}
+                  Marcar como falso positivo
+                </Button>
+              </div>
             </div>
           </TableCell>
         </TableRow>

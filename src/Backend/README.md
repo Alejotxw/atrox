@@ -373,6 +373,43 @@ Respuesta (ejemplo):
 pytest tests/test_payload_generator.py tests/test_payloads_api.py tests/test_payloads_contract.py -v
 ```
 
+### 14. Scoring de confianza para falsos positivos (HU-016)
+
+`POST /api/ai/scoring/score` — score heurístico 0-100 por hallazgo (`VulnFinding` de HU-003/HU-006), con explicación breve de las señales usadas. Umbral configurable vía `ATROX_FP_SCORE_THRESHOLD` (default `40`), sobre-escribible por request (`threshold`). Bajo el umbral, el hallazgo se marca `probable_fp: true`. Evaluación con dataset TP/FP etiquetado y métrica de precisión medida (90.9%) documentadas en [`docs/ai/HU-016-scoring-evaluation.md`](../../docs/ai/HU-016-scoring-evaluation.md).
+
+```bash
+curl -X POST http://localhost:8000/api/ai/scoring/score \
+  -H "Content-Type: application/json" \
+  -d '{
+    "finding": {
+      "template_id": "tech-detect-nginx",
+      "name": "Nginx Version Detection",
+      "severity": "info",
+      "host": "http://example.com",
+      "matched_at": "http://example.com/",
+      "tags": ["tech", "fingerprint"]
+    }
+  }'
+```
+
+Respuesta (ejemplo):
+
+```json
+{
+  "finding_id": "tech-detect-nginx",
+  "score": 0,
+  "threshold": 40,
+  "probable_fp": true,
+  "explanation": "severidad info (base 20); tags de fingerprinting/informativos ['fingerprint', 'tech'] (-20); sin descripción de contexto (-10) -> score 0/100 (umbral 40)",
+  "generation_time_ms": 0.01,
+  "within_sla": true
+}
+```
+
+```bash
+pytest tests/test_scoring_rules.py tests/test_scoring_agent.py tests/test_scoring_api.py tests/test_scoring_contract.py tests/test_scoring_precision.py -v
+```
+
 ## Pruebas
 
 ```bash
@@ -424,6 +461,7 @@ src/Backend/
 - **HU-009** — API REST unificada de creación de escaneos, `POST /api/scans` (RF-001 · RF-002)
 - **HU-010** — API REST de consulta de resultados, `GET /api/scans/{id}` (RF-001 · RF-002)
 - **HU-015** — Agente de generación de payloads contextualizados, `POST /api/ai/payloads/generate` (RF-004 · RNF-004)
+- **HU-016** — Scoring de confianza para falsos positivos, `POST /api/ai/scoring/score` (RF-005 · RNF-004)
 - **ADR-001** — Lenguaje base y concurrencia
 - **ADR-002** — Estrategia de integración IA
 - **ADR-003** — Almacenamiento seguro de auditoría

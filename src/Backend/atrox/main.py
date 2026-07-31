@@ -9,6 +9,7 @@ from atrox.api.health import router as health_router
 from atrox.api.jobs import router as jobs_router
 from atrox.api.payloads import router as payloads_router
 from atrox.api.scans import router as scans_router
+from atrox.api.scoring import router as scoring_router
 from atrox.api.vectors import router as vectors_router
 from atrox.api.vulnscan import router as vulnscan_router
 from atrox.config import get_settings
@@ -86,6 +87,7 @@ def create_app() -> FastAPI:
     application.include_router(audit_router)
     application.include_router(vectors_router)
     application.include_router(payloads_router)
+    application.include_router(scoring_router)
     return application
 
 

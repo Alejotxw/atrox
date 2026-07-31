@@ -51,6 +51,14 @@ Lógica de merge/filtro separada en `src/app/lib/findingsView.ts` (funciones pur
 npm run test -- findingsView FindingsManagementView
 ```
 
+## Marcado manual de falsos positivos (HU-022)
+
+Dentro de la fila expandida de un hallazgo (HU-021), botón **"Marcar como falso positivo"** → `POST /api/scans/{scan_id}/findings/false-positive` (`markFalsePositive` en `src/app/lib/api.ts`). Al confirmar el marcado, la fila se retira de la tabla localmente (el backend ya la excluye por defecto en HU-010, así que no hace falta refetchear toda la página).
+
+No hay login/autenticación en el frontend todavía: se reutiliza el mismo usuario hardcodeado que ya muestra el sidebar ("Admin SecOps", ver `App.tsx`) como cabecera `X-Atrox-User`, en vez de introducir un flujo de identidad nuevo fuera del alcance de esta HU.
+
+No existe tooling de E2E de navegador en el proyecto (ni Playwright ni Cypress) — el flujo completo (crear escaneo → marcar → exclusión en HU-010 → evento de auditoría HU-008) está cubierto como test de integración a nivel API en el backend (`tests/test_false_positive_e2e_flow.py`), no como E2E de UI. Del lado del frontend, el flujo de click está cubierto por tests de componente con `fetch` mockeado en `FindingsManagementView.test.tsx`.
+
 ## Sistema de UI
 
 `src/app/components/ui/` es un set shadcn/ui (Radix + `class-variance-authority` + Tailwind). Antes de HU-021 estaba en el código pero sin sus dependencias instaladas y sin uso real — `App.tsx` usaba Tailwind con colores hex a mano (`#0F172A`, `#7A1C3E`, `#D4AF37`, paleta oscura fija). HU-021 instaló las dependencias faltantes y es la primera vista que usa `components/ui/` de verdad, con los tokens de tema oscuro (`className="dark"` en el contenedor raíz de la vista, ver `src/styles/theme.css`). El resto del dashboard (`App.tsx`) sigue usando su paleta hex propia — son dos sistemas visuales coexistiendo, no unificados en esta tarea.

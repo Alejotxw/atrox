@@ -9,6 +9,13 @@ de analista: progreso, activos descubiertos (escaneos `discovery`) y
 hallazgos paginados y filtrables por severidad (escaneos `vulnscan`). Como
 un `Job` es de un solo tipo, `assets` y `findings` son mutuamente
 excluyentes según `scan_type`.
+
+`POST /api/scans/{scan_id}/findings/false-positive` (HU-022) persiste el
+marcado manual de un hallazgo como falso positivo (usuario + timestamp,
+`atrox/findings/store.py`) y por eso `GET /api/scans/{scan_id}` excluye por
+defecto los hallazgos ya marcados (`include_false_positives=true` para
+verlos). `GET /api/scans/{scan_id}/findings/false-positives` expone el
+dataset etiquetado resultante para reentrenamiento/heurística futura.
 """
 
 from datetime import datetime
@@ -19,6 +26,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
 from atrox.api.jobs import get_job_queue
+from atrox.findings.models import FalsePositiveMark, FalsePositiveMarkResponse, MarkFalsePositiveRequest
+from atrox.findings.store import FalsePositiveStore
 from atrox.queue.models import JobStatus, JobType
 from atrox.queue.service import JobQueue, QueueFullError
 from atrox.scanner.models import HostFinding, VulnFinding, VulnSeverity
@@ -116,14 +125,24 @@ async def create_scan(
     return ScanCreateResponse(scan_id=job.id, status=job.status.value)
 
 
+def get_false_positive_store(request: Request) -> FalsePositiveStore:
+    """Obtiene la instancia de FalsePositiveStore desde app.state."""
+    return request.app.state.false_positive_store
+
+
 @router.get("/{scan_id}", response_model=ScanDetailResponse)
 async def get_scan_detail(
     scan_id: UUID,
     severity: VulnSeverity | None = Query(default=None, description="Filtra hallazgos por severidad"),
     asset_status: str | None = Query(default=None, description="Filtra activos por estado (ej. up/down)"),
+    include_false_positives: bool = Query(
+        default=False,
+        description="Incluye hallazgos marcados como falso positivo (HU-022). Excluidos por defecto.",
+    ),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     queue: JobQueue = Depends(get_job_queue),
+    fp_store: FalsePositiveStore = Depends(get_false_positive_store),
 ) -> ScanDetailResponse:
     """Consulta progreso, activos descubiertos y hallazgos paginados de un escaneo.
 
@@ -150,6 +169,13 @@ async def get_scan_detail(
     if severity is not None:
         all_findings = [finding for finding in all_findings if finding.severity == severity]
 
+    if not include_false_positives and all_findings:
+        marks = await fp_store.list_marks(scan_id=str(scan_id))
+        marked_keys = {(mark.finding_id, mark.matched_at) for mark in marks}
+        all_findings = [
+            finding for finding in all_findings if (finding.template_id, finding.matched_at) not in marked_keys
+        ]
+
     total = len(all_findings)
     start = (page - 1) * page_size
     page_items = all_findings[start : start + page_size]
@@ -173,3 +199,59 @@ async def get_scan_detail(
         started_at=job.started_at,
         finished_at=job.finished_at,
     )
+
+
+@router.post(
+    "/{scan_id}/findings/false-positive",
+    status_code=201,
+    response_model=FalsePositiveMarkResponse,
+)
+async def mark_finding_false_positive(
+    scan_id: UUID,
+    body: MarkFalsePositiveRequest,
+    request: Request,
+    fp_store: FalsePositiveStore = Depends(get_false_positive_store),
+    x_atrox_user: str | None = Header(default=None, alias="X-Atrox-User"),
+) -> FalsePositiveMarkResponse:
+    """Marca un hallazgo como falso positivo (HU-022): persiste usuario y
+    timestamp, y lo excluye de `GET /api/scans/{scan_id}` por defecto.
+    """
+    finding_id = body.finding_id or body.finding.template_id
+    user = x_atrox_user or "system"
+
+    mark = await fp_store.mark(
+        scan_id=str(scan_id),
+        finding_id=finding_id,
+        finding=body.finding,
+        user=user,
+        reason=body.reason,
+    )
+
+    audit_log = getattr(request.app.state, "audit_log", None)
+    if audit_log is not None:
+        await audit_log.record(
+            user=user,
+            action="finding.marked_false_positive",
+            resource=f"scan:{scan_id}:finding:{finding_id}",
+            metadata={"reason": body.reason} if body.reason else {},
+        )
+
+    return FalsePositiveMarkResponse(
+        id=mark.id,
+        scan_id=mark.scan_id,
+        finding_id=mark.finding_id,
+        user=mark.user,
+        reason=mark.reason,
+        marked_at=mark.marked_at,
+    )
+
+
+@router.get("/{scan_id}/findings/false-positives", response_model=list[FalsePositiveMark])
+async def list_false_positives(
+    scan_id: UUID,
+    fp_store: FalsePositiveStore = Depends(get_false_positive_store),
+) -> list[FalsePositiveMark]:
+    """Lista los hallazgos marcados como falso positivo de un escaneo — dataset
+    etiquetado reutilizable para reentrenamiento/heurística futura (HU-022 DoD).
+    """
+    return await fp_store.list_marks(scan_id=str(scan_id))

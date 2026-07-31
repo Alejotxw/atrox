@@ -56,6 +56,9 @@ cp .env.example .env
 | `ATROX_NMAP_PATH` | Ruta al binario de Nmap | `nmap` |
 | `ATROX_NMAP_TIMEOUT_SECONDS` | Timeout máximo por escaneo | `300` |
 | `ATROX_ENCRYPTION_MASTER_KEY` | Llave AES-256 (base64/hex, 32 bytes) — **solo env** | *(requerida para cifrado)* |
+| `ATROX_CORS_ORIGINS` | Orígenes permitidos para el frontend, JSON array (ej. `'["http://localhost:5173"]'`) | `["http://localhost:5173", "http://127.0.0.1:5173"]` |
+
+**Nota:** si corrés el frontend (`npm run dev`, Vite) en un puerto distinto a `5173`, agregá ese origen a `ATROX_CORS_ORIGINS` o las peticiones del navegador van a fallar en el preflight (`OPTIONS`) antes de llegar a la API.
 
 ### 4. Iniciar el servidor (Uvicorn async)
 
@@ -410,6 +413,52 @@ Respuesta (ejemplo):
 pytest tests/test_scoring_rules.py tests/test_scoring_agent.py tests/test_scoring_api.py tests/test_scoring_contract.py tests/test_scoring_precision.py -v
 ```
 
+### 15. Marcado manual de falsos positivos (HU-022)
+
+Retroalimentación humana sobre hallazgos: un SysAdmin puede marcar un hallazgo de un escaneo como falso positivo, lo que (a) persiste el marcado con usuario y timestamp en `data/false_positives.jsonl` (`atrox/findings/store.py`, mismo patrón append-only que el log de auditoría de HU-008), (b) excluye ese hallazgo de `GET /api/scans/{scan_id}` **por defecto**, y (c) registra un evento `finding.marked_false_positive` en el log de auditoría firmado de HU-008.
+
+```bash
+curl -X POST http://localhost:8000/api/scans/<scan_id>/findings/false-positive \
+  -H "Content-Type: application/json" \
+  -H "X-Atrox-User: sysadmin.rivera" \
+  -d '{
+    "finding": {
+      "template_id": "cve-generic-banner-match",
+      "name": "CVE Banner Match (Generic)",
+      "severity": "high",
+      "host": "http://example.com",
+      "matched_at": "http://example.com/",
+      "tags": ["cve", "tech"]
+    },
+    "reason": "Banner grab genérico, no explotable"
+  }'
+```
+
+Respuesta (`201 Created`):
+
+```json
+{
+  "id": "b3f1...",
+  "scan_id": "...",
+  "finding_id": "cve-generic-banner-match",
+  "user": "sysadmin.rivera",
+  "reason": "Banner grab genérico, no explotable",
+  "marked_at": "2026-07-31T..."
+}
+```
+
+Para volver a ver hallazgos marcados en el listado: `GET /api/scans/{scan_id}?include_false_positives=true`.
+
+Para el dataset etiquetado reutilizable en reentrenamiento/heurística futura (DoD): `GET /api/scans/{scan_id}/findings/false-positives` retorna cada marcado con el `VulnFinding` completo (severidad, tags, evidencia) junto al usuario y timestamp — mismo formato que `tests/fixtures/scoring_dataset.py` de HU-016.
+
+Si `ATROX_ENCRYPTION_MASTER_KEY` está configurada, los campos sensibles del `finding` persistido (`description`, `evidence`, `poc`, `raw_output` — ya registrados en `sensitive_fields.py` bajo la categoría `"finding"`, ADR-003) se cifran en reposo antes de escribirse a disco.
+
+**Limitación conocida:** la exclusión por defecto usa `(template_id, matched_at)` para identificar el hallazgo marcado — si se marca con un `finding_id` explícito distinto de `template_id` (override del payload), `GET /api/scans/{scan_id}` no lo excluirá, ya que la comparación en HU-010 asume el `finding_id` por defecto.
+
+```bash
+pytest tests/test_false_positive_store.py tests/test_false_positive_api.py tests/test_false_positive_e2e_flow.py -v
+```
+
 ## Pruebas
 
 ```bash
@@ -462,6 +511,7 @@ src/Backend/
 - **HU-010** — API REST de consulta de resultados, `GET /api/scans/{id}` (RF-001 · RF-002)
 - **HU-015** — Agente de generación de payloads contextualizados, `POST /api/ai/payloads/generate` (RF-004 · RNF-004)
 - **HU-016** — Scoring de confianza para falsos positivos, `POST /api/ai/scoring/score` (RF-005 · RNF-004)
+- **HU-022** — Marcado manual de falsos positivos, `POST /api/scans/{id}/findings/false-positive` (RF-006)
 - **ADR-001** — Lenguaje base y concurrencia
 - **ADR-002** — Estrategia de integración IA
 - **ADR-003** — Almacenamiento seguro de auditoría

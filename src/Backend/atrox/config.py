@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     port: int = 8000
     env: str = "development"
     debug: bool = False
+
+    # CORS: origenes permitidos para que el frontend (Vite, otro puerto/origen)
+    # pueda llamar a la API desde el navegador. Override vía env como JSON,
+    # ej. ATROX_CORS_ORIGINS='["http://localhost:5173","http://otro:4000"]'.
+    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     nmap_path: str = "nmap"
     nmap_timeout_seconds: int = 300
     nuclei_path: str = "nuclei"
@@ -39,6 +44,9 @@ class Settings(BaseSettings):
 
     # Scoring de confianza / falsos positivos (HU-016 / RF-005)
     fp_score_threshold: int = 40
+
+    # Marcado manual de falsos positivos (HU-022)
+    false_positive_store_path: str = "data/false_positives.jsonl"
 
 
 @lru_cache

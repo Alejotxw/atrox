@@ -1,5 +1,5 @@
 /**
- * Cliente HTTP tipado hacia el backend Atrox (HU-010, HU-014, HU-016).
+ * Cliente HTTP tipado hacia el backend Atrox (HU-010, HU-014, HU-016, HU-022).
  * No hay librería HTTP instalada en el proyecto (ni axios ni ky) — fetch nativo alcanza.
  */
 
@@ -23,8 +23,8 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...init,
+    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   });
 
   if (!response.ok) {
@@ -160,5 +160,32 @@ export function analyzeVectors(findings: VulnFinding[]): Promise<VectorAnalysisR
   return request<VectorAnalysisResult>('/api/ai/vectors/analyze', {
     method: 'POST',
     body: JSON.stringify({ findings }),
+  });
+}
+
+// -- Tipos que reflejan atrox/findings/models.py (HU-022) -----------------------
+
+export interface FalsePositiveMarkResponse {
+  id: string;
+  scan_id: string;
+  finding_id: string;
+  user: string;
+  reason: string | null;
+  marked_at: string;
+}
+
+export function markFalsePositive(
+  scanId: string,
+  finding: VulnFinding,
+  options: { findingId?: string; reason?: string; user?: string } = {},
+): Promise<FalsePositiveMarkResponse> {
+  return request<FalsePositiveMarkResponse>(`/api/scans/${scanId}/findings/false-positive`, {
+    method: 'POST',
+    headers: options.user ? { 'X-Atrox-User': options.user } : undefined,
+    body: JSON.stringify({
+      finding,
+      finding_id: options.findingId,
+      reason: options.reason,
+    }),
   });
 }

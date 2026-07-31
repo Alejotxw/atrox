@@ -11,10 +11,17 @@ vi.mock('../../lib/api', async () => {
     getScanDetail: vi.fn(),
     scoreFinding: vi.fn(),
     analyzeVectors: vi.fn(),
+    markFalsePositive: vi.fn(),
   };
 });
 
-import { analyzeVectors, getScanDetail, scoreFinding, ApiError } from '../../lib/api';
+import {
+  analyzeVectors,
+  getScanDetail,
+  markFalsePositive,
+  scoreFinding,
+  ApiError,
+} from '../../lib/api';
 
 const SCAN_ID = '11111111-1111-1111-1111-111111111111';
 
@@ -134,6 +141,7 @@ beforeEach(() => {
   vi.mocked(getScanDetail).mockReset();
   vi.mocked(scoreFinding).mockReset();
   vi.mocked(analyzeVectors).mockReset();
+  vi.mocked(markFalsePositive).mockReset();
 });
 
 describe('FindingsManagementView', () => {
@@ -237,5 +245,78 @@ describe('FindingsManagementView', () => {
     await waitFor(() => expect(screen.queryByText('Nginx Detection')).not.toBeInTheDocument());
     expect(screen.getByText('Apache Path Traversal')).toBeInTheDocument();
     expect(getScanDetail).toHaveBeenCalledTimes(1);
+  });
+
+  describe('marcado manual de falso positivo (HU-022)', () => {
+    it('calls markFalsePositive with the scan id, finding and current user on click', async () => {
+      setupHappyPath();
+      vi.mocked(markFalsePositive).mockResolvedValue({
+        id: 'mark-1',
+        scan_id: SCAN_ID,
+        finding_id: WEAK_FINDING.template_id,
+        user: 'Admin SecOps',
+        reason: null,
+        marked_at: '2026-07-31T00:00:00Z',
+      });
+      const user = userEvent.setup();
+      render(<FindingsManagementView />);
+
+      await loadScan(user);
+      await screen.findByText('Nginx Detection');
+
+      const toggles = screen.getAllByRole('button', { name: /mostrar evidencia/i });
+      await user.click(toggles[1]); // fila de Nginx Detection (weak finding)
+
+      await user.click(await screen.findByRole('button', { name: /marcar como falso positivo/i }));
+
+      await waitFor(() =>
+        expect(markFalsePositive).toHaveBeenCalledWith(
+          SCAN_ID,
+          expect.objectContaining({ template_id: WEAK_FINDING.template_id }),
+          expect.objectContaining({ findingId: WEAK_FINDING.template_id, user: 'Admin SecOps' }),
+        ),
+      );
+    });
+
+    it('removes the finding from the table after a successful mark', async () => {
+      setupHappyPath();
+      vi.mocked(markFalsePositive).mockResolvedValue({
+        id: 'mark-1',
+        scan_id: SCAN_ID,
+        finding_id: WEAK_FINDING.template_id,
+        user: 'Admin SecOps',
+        reason: null,
+        marked_at: '2026-07-31T00:00:00Z',
+      });
+      const user = userEvent.setup();
+      render(<FindingsManagementView />);
+
+      await loadScan(user);
+      await screen.findByText('Nginx Detection');
+
+      const toggles = screen.getAllByRole('button', { name: /mostrar evidencia/i });
+      await user.click(toggles[1]);
+      await user.click(await screen.findByRole('button', { name: /marcar como falso positivo/i }));
+
+      await waitFor(() => expect(screen.queryByText('Nginx Detection')).not.toBeInTheDocument());
+      expect(screen.getByText('Apache Path Traversal')).toBeInTheDocument();
+    });
+
+    it('shows an alert and keeps the row when marking fails', async () => {
+      setupHappyPath();
+      vi.mocked(markFalsePositive).mockRejectedValue(new ApiError(500, 'Error al persistir el marcado'));
+      const user = userEvent.setup();
+      render(<FindingsManagementView />);
+
+      await loadScan(user);
+      await screen.findByText('Nginx Detection');
+
+      const toggles = screen.getAllByRole('button', { name: /mostrar evidencia/i });
+      await user.click(toggles[1]);
+      await user.click(await screen.findByRole('button', { name: /marcar como falso positivo/i }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/Error al persistir el marcado/);
+      expect(screen.getByText('Nginx Detection')).toBeInTheDocument();
+    });
   });
 });

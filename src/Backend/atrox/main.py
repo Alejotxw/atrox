@@ -1,3 +1,4 @@
+import asyncio
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,6 +13,7 @@ from atrox.api.jobs import router as jobs_router
 from atrox.api.payloads import router as payloads_router
 from atrox.api.scans import router as scans_router
 from atrox.api.scoring import router as scoring_router
+from atrox.api.threats import router as threats_router
 from atrox.api.vectors import router as vectors_router
 from atrox.api.vulnscan import router as vulnscan_router
 from atrox.config import get_settings
@@ -23,6 +25,7 @@ from atrox.scanner.nuclei_wrapper import NucleiWrapper
 from atrox.security.audit_deps import build_audit_log_service
 from atrox.security.deps import get_encryption_service_from_settings
 from atrox.security.sensitive_fields import SensitiveFieldEncryptor
+from atrox.threat_intel.service import build_nvd_sync_service
 
 
 async def _dispatch_scan(job: Job) -> dict:
@@ -80,7 +83,31 @@ async def lifespan(app: FastAPI):
         encryptor=fp_encryptor,
     )
 
+    # Sincronización diaria NVD (HU-005 / RF-010): el scheduler duerme
+    # primero, así el arranque no hace llamadas de red; la primera
+    # sincronización se dispara manualmente (POST /api/threats/sync o CLI).
+    nvd_sync_service = build_nvd_sync_service()
+    app.state.nvd_sync_service = nvd_sync_service
+    app.state.nvd_sync_task = None
+    app.state.nvd_startup_sync_task = None
+    if settings.nvd_sync_enabled:
+        app.state.nvd_sync_task = asyncio.create_task(
+            nvd_sync_service.run_daily(
+                interval_seconds=settings.nvd_sync_interval_hours * 3600
+            )
+        )
+        if settings.nvd_sync_on_startup:
+            app.state.nvd_startup_sync_task = asyncio.create_task(
+                nvd_sync_service.sync_once_safe()
+            )
+
     yield
+
+    for attr in ("nvd_sync_task", "nvd_startup_sync_task"):
+        task = getattr(app.state, attr, None)
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     await job_queue.shutdown()
 
@@ -108,6 +135,7 @@ def create_app() -> FastAPI:
     application.include_router(vectors_router)
     application.include_router(payloads_router)
     application.include_router(scoring_router)
+    application.include_router(threats_router)
     return application
 
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 const API_BASE = 'http://localhost:3000/api';
 
@@ -28,7 +28,6 @@ export default function ScheduleManager() {
 
   const fetchSchedules = async () => {
     try {
-      setLoading(true);
       const res = await fetch(`${API_BASE}/schedules`);
       if (!res.ok) throw new Error('Error al cargar la lista de programaciones');
       const data = await res.json();
@@ -43,7 +42,28 @@ export default function ScheduleManager() {
   };
 
   useEffect(() => {
-    fetchSchedules();
+    let active = true;
+    fetch(`${API_BASE}/schedules`)
+      .then(res => {
+        if (!res.ok) throw new Error('Error al cargar la lista de programaciones');
+        return res.json();
+      })
+      .then(data => {
+        if (active) {
+          setSchedules(data);
+          setError(null);
+        }
+      })
+      .catch(err => {
+        if (active) {
+          console.error(err);
+          setError(err.message);
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
   }, []);
 
   const showNotification = (msg, isSuccess = true) => {
@@ -87,7 +107,7 @@ export default function ScheduleManager() {
     }
   };
 
-  const handleToggle = async (id, currentStatus) => {
+  const handleToggle = async (id) => {
     try {
       const res = await fetch(`${API_BASE}/schedules/${id}/toggle`, {
         method: 'PATCH'
@@ -324,7 +344,7 @@ export default function ScheduleManager() {
                     <div className="action-buttons">
                       <button
                         className={`btn btn-xs ${rule.isActive ? 'btn-warning' : 'btn-success'}`}
-                        onClick={() => handleToggle(rule.id, rule.isActive)}
+                        onClick={() => handleToggle(rule.id)}
                         title={rule.isActive ? 'Pausar regla' : 'Reanudar regla'}
                       >
                         {rule.isActive ? '⏸ Pausar' : '▶ Reanudar'}

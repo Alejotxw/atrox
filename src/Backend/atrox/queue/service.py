@@ -7,6 +7,8 @@ from concurrent.futures import Executor
 from datetime import datetime, timezone
 from uuid import UUID
 
+from atrox.console.bus import get_scan_log_bus
+from atrox.console.models import LogSeverity
 from atrox.queue.models import Job, JobStatus, JobType, QueueMetrics
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,12 @@ class JobQueue:
         job = Job(job_type=job_type, params=params)
         self._jobs[job.id] = job
         await self._queue.put(job.id)
+        await self._emit_log(
+            "QUEUE",
+            f"Job {job.id} enqueued type={job_type.value} target={params.get('target', '?')}",
+            severity=LogSeverity.INFO,
+            job_id=job.id,
+        )
         return job
 
     def get_job(self, job_id: UUID) -> Job | None:
@@ -125,16 +133,54 @@ class JobQueue:
             async with self._semaphore:
                 job.transition_to(JobStatus.RUNNING)
                 job.started_at = datetime.now(timezone.utc)
+                module = "NMAP" if job.job_type == JobType.DISCOVERY else "NUCLEI"
+                await self._emit_log(
+                    module,
+                    f"Job {job.id} started ({job.job_type.value})",
+                    severity=LogSeverity.INFO,
+                    job_id=job.id,
+                )
 
                 try:
                     result = await self._scanner(job)  # type: ignore[misc]
                     job.result = result
                     job.transition_to(JobStatus.DONE)
+                    await self._emit_log(
+                        module,
+                        f"Job {job.id} completed successfully",
+                        severity=LogSeverity.INFO,
+                        job_id=job.id,
+                    )
                 except Exception as exc:
                     job.error = str(exc)
                     job.transition_to(JobStatus.FAILED)
                     logger.exception("Error ejecutando trabajo %s", job_id)
+                    await self._emit_log(
+                        module,
+                        f"Job {job.id} failed: {exc}",
+                        severity=LogSeverity.ERROR,
+                        job_id=job.id,
+                    )
                 finally:
                     job.finished_at = datetime.now(timezone.utc)
 
             self._queue.task_done()
+
+    async def _emit_log(
+        self,
+        module: str,
+        message: str,
+        *,
+        severity: LogSeverity,
+        job_id: UUID | None = None,
+    ) -> None:
+        """Publica línea de consola; nunca interrumpe la cola si el bus falla."""
+        try:
+            await get_scan_log_bus().emit(
+                module,
+                message,
+                severity=severity,
+                job_id=job_id,
+            )
+        except Exception:
+            logger.exception("No se pudo emitir log de consola")

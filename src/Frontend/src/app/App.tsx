@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { 
   ShieldAlert, 
-  TerminalSquare, 
   Database, 
   Radar, 
   ScanLine, 
@@ -29,23 +28,11 @@ import {
   ListFilter
 } from 'lucide-react';
 import FindingsManagementView from './components/findings/FindingsManagementView';
+import ScanConsole from './components/ScanConsole/ScanConsole';
 import DashboardMetricsPanel from './pages/Dashboard';
 
 // --- Datos Iniciales Simulados para la vista inicial ---
 const INITIAL_METRICS = { subdomains: "42", ports: "8", vulns: "3", report: "Generando" };
-const INITIAL_LOGS = [
-  { id: 1, time: '14:02:11', module: 'INFO', color: 'text-blue-400', text: 'Starting AI-Pentest Framework v1.0' },
-  { id: 2, time: '14:02:12', module: 'NMAP', color: 'text-purple-400', text: 'Scanning target: corp.internal.uide.edu.ec' },
-  { id: 3, time: '14:02:45', module: 'NMAP', color: 'text-purple-400', text: 'Discovered open port 80/tcp (http)' },
-  { id: 4, time: '14:02:45', module: 'NMAP', color: 'text-purple-400', text: 'Discovered open port 443/tcp (https)' },
-  { id: 5, time: '14:02:45', module: 'NMAP', color: 'text-purple-400', text: 'Discovered open port 3306/tcp (mysql)' },
-  { id: 6, time: '14:03:10', module: 'NUCLEI', color: 'text-emerald-400', text: 'Loading templates for web vulnerabilities...' },
-  { id: 7, time: '14:03:15', module: 'NUCLEI', color: 'text-emerald-400', isCritical: true, text: 'SQL Injection found on /login.php (parameter \'user\')' },
-  { id: 8, time: '14:03:18', module: 'NUCLEI', color: 'text-emerald-400', isCritical: true, text: 'Apache Path Traversal (CVE-2021-41773) in /cgi-bin/' },
-  { id: 9, time: '14:03:22', module: 'NUCLEI', color: 'text-emerald-400', isMedium: true, text: 'Default credentials allowed on MySQL Port 3306' },
-  { id: 10, time: '14:03:25', module: 'OLLAMA', color: 'text-[#D4AF37]', text: 'Feeding findings to Local Llama 3 Engine for correlation...' },
-  { id: 11, time: '14:03:28', module: 'OLLAMA', color: 'text-[#D4AF37]', text: 'Generating mitigation strategies based on CVE databases...' }
-];
 const INITIAL_FINDINGS = [
   { id: 'VULN-001', name: 'SQL Injection (Blind)', vector: 'HTTP POST /login.php', severity: 'Crítico', status: 'checked' },
   { id: 'VULN-002', name: 'Apache Path Traversal (CVE-2021-41773)', vector: 'GET /cgi-bin/', severity: 'Crítico', status: 'checked' },
@@ -60,88 +47,53 @@ export default function App() {
   const [isAuditing, setIsAuditing] = useState(false);
   
   const [metrics, setMetrics] = useState(INITIAL_METRICS);
-  const [logs, setLogs] = useState(INITIAL_LOGS);
   const [findings, setFindings] = useState(INITIAL_FINDINGS);
   const [showInsights, setShowInsights] = useState(true);
-  
-  const logsEndRef = useRef<HTMLDivElement>(null);
-
-  // --- AUTO-SCROLL DE LA CONSOLA ---
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
+  const [auditToken, setAuditToken] = useState(0);
 
   // --- UTILIDAD PARA SIMULAR RETRASOS ---
   const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
-  const getCurrentTime = () => new Date().toTimeString().split(' ')[0];
 
-  // --- MOTOR DE SIMULACIÓN DE AUDITORÍA ---
+  // --- MOTOR DE SIMULACIÓN DE AUDITORÍA (métricas/hallazgos UI; logs vía SSE HU-020) ---
   const handleStartAudit = async () => {
     if (isAuditing || !targetUrl.trim()) return;
     
     setIsAuditing(true);
-    setLogs([]);
+    setAuditToken((n) => n + 1);
     setFindings([]);
     setShowInsights(false);
     setMetrics({ subdomains: "0", ports: "0", vulns: "0", report: "Iniciando" });
-    
-    const addLog = (module: string, color: string, text: string, isCritical = false, isMedium = false) => {
-      setLogs(prev => [...prev, { id: Date.now() + Math.random(), time: getCurrentTime(), module, color, text, isCritical, isMedium }]);
-    };
 
-    // Paso 1: Inicio
-    await delay(500);
-    addLog('INFO', 'text-blue-400', 'Starting AI-Pentest Framework v1.0');
-    
-    // Paso 2: NMAP
+    // Paso 1–2: NMAP (métricas locales; la consola llega por SSE)
     await delay(1200);
-    addLog('NMAP', 'text-purple-400', `Scanning target: ${targetUrl}`);
     setMetrics(m => ({ ...m, ports: "Scanning..." }));
     
-    await delay(1500);
-    addLog('NMAP', 'text-purple-400', 'Discovered open port 80/tcp (http)');
-    await delay(400);
-    addLog('NMAP', 'text-purple-400', 'Discovered open port 443/tcp (https)');
-    await delay(600);
-    addLog('NMAP', 'text-purple-400', 'Discovered open port 3306/tcp (mysql)');
+    await delay(2500);
     setMetrics(m => ({ ...m, ports: "3" }));
 
     // Paso 3: Subfinder
     await delay(1200);
-    addLog('SUBFIND', 'text-blue-400', 'Discovering subdomains...');
     setMetrics(m => ({ ...m, subdomains: "Buscando..." }));
     
     await delay(1800);
     setMetrics(m => ({ ...m, subdomains: "42" }));
     
     // Paso 4: Nuclei (Vulnerabilidades)
-    await delay(800);
-    addLog('NUCLEI', 'text-emerald-400', 'Loading templates for web vulnerabilities...');
-    
-    await delay(2000);
-    addLog('NUCLEI', 'text-emerald-400', `SQL Injection found on /login.php (parameter 'user')`, true);
+    await delay(2800);
     setFindings(prev => [...prev, { id: 'VULN-001', name: 'SQL Injection (Blind)', vector: 'HTTP POST /login.php', severity: 'Crítico', status: 'unchecked' }]);
     setMetrics(m => ({ ...m, vulns: "1" }));
     
     await delay(1200);
-    addLog('NUCLEI', 'text-emerald-400', 'Apache Path Traversal (CVE-2021-41773) in /cgi-bin/', true);
     setFindings(prev => [...prev, { id: 'VULN-002', name: 'Apache Path Traversal (CVE-2021-41773)', vector: 'GET /cgi-bin/', severity: 'Crítico', status: 'unchecked' }]);
     setMetrics(m => ({ ...m, vulns: "2" }));
 
     await delay(1500);
-    addLog('NUCLEI', 'text-emerald-400', 'Default credentials allowed on MySQL Port 3306', false, true);
     setFindings(prev => [...prev, { id: 'VULN-003', name: 'Default DB Credentials', vector: 'MySQL Port 3306', severity: 'Medio', status: 'unchecked' }]);
     setFindings(prev => [...prev, { id: 'VULN-004', name: 'Open Directory Listing', vector: 'GET /assets/uploads/', severity: 'Info', status: 'na' }]);
     setMetrics(m => ({ ...m, vulns: "3", report: "Analizando" }));
 
     // Paso 5: Ollama Insights
-    await delay(1500);
-    addLog('OLLAMA', 'text-[#D4AF37]', 'Feeding findings to Local Llama 3 Engine for correlation...');
-    
-    await delay(2000);
-    addLog('OLLAMA', 'text-[#D4AF37]', 'Generating mitigation strategies based on CVE databases...');
-    
-    await delay(1500);
+    await delay(3500);
     setShowInsights(true);
     setMetrics(m => ({ ...m, report: "Completado" }));
     setIsAuditing(false);
@@ -259,39 +211,12 @@ export default function App() {
                 {/* 4. Área Central - El Núcleo del Proyecto */}
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-both">
                   
-                  {/* Consola de Ejecución */}
-                  <div className="xl:col-span-2 bg-[#000000] border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-2xl relative min-w-0">
-                    <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/20 pointer-events-none"></div>
-                    <div className="bg-[#1E293B] px-5 py-3 border-b border-slate-800 flex items-center justify-between z-10">
-                      <div className="flex items-center gap-2.5">
-                        <TerminalSquare className="w-4 h-4 text-slate-400" />
-                        <span className="text-xs font-mono text-slate-300 font-semibold tracking-wide">Consola de Ejecución UNIX</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <div className="w-3 h-3 rounded-full bg-red-500/90 shadow-[0_0_5px_rgba(239,68,68,0.5)]"></div>
-                        <div className="w-3 h-3 rounded-full bg-yellow-500/90 shadow-[0_0_5px_rgba(234,179,8,0.5)]"></div>
-                        <div className="w-3 h-3 rounded-full bg-green-500/90 shadow-[0_0_5px_rgba(34,197,94,0.5)]"></div>
-                      </div>
-                    </div>
-                    <div className="p-6 font-mono text-[13px] text-slate-300 leading-relaxed overflow-y-auto h-[420px] space-y-1.5 z-10 scroll-smooth">
-                      <div className="text-slate-500">root@ai-pentest:~# ./run_audit.sh --target {targetUrl}</div>
-                      {logs.map((log) => (
-                        <div key={log.id} className="text-slate-500 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                          [{log.time}] <span className={`${log.color} font-semibold`}>[{log.module}]</span>{' '}
-                          {log.isCritical && <span className="text-red-400 font-bold">[CRITICAL] </span>}
-                          {log.isMedium && <span className="text-[#D4AF37] font-bold">[MEDIUM] </span>}
-                          {log.text}
-                        </div>
-                      ))}
-                      {isAuditing && (
-                        <div className="flex items-center gap-2 mt-3">
-                          <span className="text-green-400">root@ai-pentest:~#</span>
-                          <span className="w-2.5 h-4 bg-slate-300 animate-pulse"></span>
-                        </div>
-                      )}
-                      <div ref={logsEndRef} />
-                    </div>
-                  </div>
+                  {/* Consola de Ejecución — stream SSE (HU-020) */}
+                  <ScanConsole
+                    targetUrl={targetUrl}
+                    auditToken={auditToken}
+                    isAuditing={isAuditing}
+                  />
 
                   {/* Módulo de IA - Ollama Insights */}
                   <div className="xl:col-span-1 bg-gradient-to-br from-[#1E293B] via-[#141E30] to-[#0B1121] border border-[#D4AF37]/50 rounded-xl overflow-hidden shadow-[0_0_25px_rgba(212,175,55,0.08)] flex flex-col relative min-w-0">

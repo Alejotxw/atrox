@@ -211,3 +211,18 @@ export interface Job {
 export function listJobs(): Promise<Job[]> {
   return request<Job[]>('/api/jobs');
 }
+
+// -- Consola en vivo SSE (HU-020) ---------------------------------------------
+
+export interface ConsoleSimulateResponse {
+  status: string;
+  target: string;
+}
+
+/** Dispara una demo simulada que emite logs por GET /api/console/stream. */
+export function startConsoleDemo(target: string): Promise<ConsoleSimulateResponse> {
+  return request<ConsoleSimulateResponse>('/api/console/simulate', {
+    method: 'POST',
+    body: JSON.stringify({ target }),
+  });
+}

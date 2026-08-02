@@ -29,6 +29,7 @@ import {
   ListFilter
 } from 'lucide-react';
 import FindingsManagementView from './components/findings/FindingsManagementView';
+import DashboardMetricsPanel from './pages/Dashboard';
 
 // --- Datos Iniciales Simulados para la vista inicial ---
 const INITIAL_METRICS = { subdomains: "42", ports: "8", vulns: "3", report: "Generando" };
@@ -252,43 +253,14 @@ export default function App() {
             {/* MAIN CONTENT VIEWS */}
             {activeTab === 'Dashboard' && (
               <>
-                {/* 3. Panel Superior de Métricas */}
-                <div className="grid grid-cols-4 gap-6 animate-in fade-in duration-300">
-                  <MetricCard 
-                    title="Subdominios Descubiertos" 
-                    value={metrics.subdomains} 
-                    module="Módulo Subfinder" 
-                    icon={<Network />} 
-                    color="blue" 
-                  />
-                  <MetricCard 
-                    title="Puertos y Servicios" 
-                    value={metrics.ports} 
-                    module="Módulo Nmap" 
-                    icon={<Server />} 
-                    color="indigo" 
-                  />
-                  <MetricCard 
-                    title="Vulnerabilidades Críticas" 
-                    value={metrics.vulns} 
-                    module="Módulo Nuclei" 
-                    icon={<AlertTriangle />} 
-                    color="red" 
-                  />
-                  <MetricCard 
-                    title="Estado del Reporte" 
-                    value={metrics.report} 
-                    module="Módulo ReportLab" 
-                    icon={<FileText />} 
-                    color="gold" 
-                  />
-                </div>
+                {/* HU-019 — KPIs reales desde HU-010 (polling sin recarga) */}
+                <DashboardMetricsPanel />
 
                 {/* 4. Área Central - El Núcleo del Proyecto */}
-                <div className="grid grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-both">
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-both">
                   
                   {/* Consola de Ejecución */}
-                  <div className="col-span-2 bg-[#000000] border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-2xl relative">
+                  <div className="xl:col-span-2 bg-[#000000] border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-2xl relative min-w-0">
                     <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/20 pointer-events-none"></div>
                     <div className="bg-[#1E293B] px-5 py-3 border-b border-slate-800 flex items-center justify-between z-10">
                       <div className="flex items-center gap-2.5">
@@ -322,7 +294,7 @@ export default function App() {
                   </div>
 
                   {/* Módulo de IA - Ollama Insights */}
-                  <div className="col-span-1 bg-gradient-to-br from-[#1E293B] via-[#141E30] to-[#0B1121] border border-[#D4AF37]/50 rounded-xl overflow-hidden shadow-[0_0_25px_rgba(212,175,55,0.08)] flex flex-col relative">
+                  <div className="xl:col-span-1 bg-gradient-to-br from-[#1E293B] via-[#141E30] to-[#0B1121] border border-[#D4AF37]/50 rounded-xl overflow-hidden shadow-[0_0_25px_rgba(212,175,55,0.08)] flex flex-col relative min-w-0">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-[#D4AF37]/5 blur-3xl rounded-full pointer-events-none"></div>
                     
                     <div className="px-6 py-4 border-b border-[#D4AF37]/20 flex justify-between items-center bg-[#D4AF37]/10 z-10">
@@ -465,32 +437,6 @@ const NavItem = ({ icon, label, active, badge, onClick }: { icon: React.ReactEle
     )}
   </button>
 );
-
-const MetricCard = ({ title, value, module, icon, color }: { title: string, value: string, module: string, icon: React.ReactElement, color: string }) => {
-  const colorMap: Record<string, string> = {
-    blue: 'text-blue-400 bg-blue-500/10 border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.05)]',
-    indigo: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.05)]',
-    red: 'text-red-400 bg-red-500/10 border-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.05)]',
-    gold: 'text-[#D4AF37] bg-[#D4AF37]/10 border-[#D4AF37]/20 shadow-[0_0_15px_rgba(212,175,55,0.05)]',
-  };
-  
-  return (
-    <div className="bg-[#1E293B] border border-slate-700 rounded-xl p-6 shadow-lg transition-transform hover:-translate-y-1 duration-300">
-      <div className="flex justify-between items-start">
-        <div>
-          <p className="text-[13px] text-slate-400 font-semibold mb-2">{title}</p>
-          <h3 className="text-3xl font-black text-white tracking-tight">{value}</h3>
-        </div>
-        <div className={`p-3 rounded-xl border ${colorMap[color]}`}>
-          {React.cloneElement(icon, { className: 'w-6 h-6' })}
-        </div>
-      </div>
-      <div className="mt-5 pt-4 border-t border-slate-700/50 flex items-center gap-2">
-        <span className="text-[10px] uppercase tracking-widest font-bold text-slate-500">{module}</span>
-      </div>
-    </div>
-  );
-};
 
 const TableRow = ({ id, name, vector, severity, status, onValidate }: { id: string, name: string, vector: string, severity: string, status: string, onValidate?: () => void }) => {
   const getSeverityBadge = (sev: string) => {

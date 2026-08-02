@@ -1,8 +1,8 @@
-"""Router de trabajos de escaneo — CRUD y metricas (HU-004)."""
+"""Router de trabajos de escaneo — CRUD y metricas (HU-004 / HU-007)."""
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from atrox.queue.models import Job, JobType, QueueMetrics
@@ -10,9 +10,6 @@ from atrox.queue.service import JobQueue, QueueFullError
 from atrox.scanner.validators import validate_target
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
-
-
-# -- Modelos de request/response para la API --------------------------------
 
 
 class JobSubmitRequest(BaseModel):
@@ -35,17 +32,9 @@ class JobSubmitResponse(BaseModel):
     status: str
 
 
-# -- Dependencia de inyeccion -----------------------------------------------
-
-
 def get_job_queue(request: Request) -> JobQueue:
     """Obtiene la instancia de JobQueue desde app.state."""
     return request.app.state.job_queue
-
-
-# -- Endpoints ---------------------------------------------------------------
-# NOTA: /metrics y la lista GET "" se registran ANTES de /{job_id}
-# para que FastAPI no interprete "metrics" como un UUID.
 
 
 @router.post("", status_code=202, response_model=JobSubmitResponse)
@@ -78,10 +67,24 @@ async def submit_job(
 
 @router.get("", response_model=list[Job])
 async def list_jobs(
+    request: Request,
     queue: JobQueue = Depends(get_job_queue),
 ) -> list[Job]:
-    """Retorna todos los trabajos registrados."""
-    return queue.list_jobs()
+    """Retorna todos los trabajos; descifra findings del result si hay cifrado."""
+    persistence = getattr(request.app.state, "persistence", None)
+    jobs = queue.list_jobs()
+    if persistence is None:
+        return jobs
+
+    decrypted: list[Job] = []
+    for job in jobs:
+        if job.result and isinstance(job.result.get("findings"), list):
+            data = job.model_dump(mode="json")
+            data["result"] = persistence.decrypt_job_result(job.result)
+            decrypted.append(Job.model_validate(data))
+        else:
+            decrypted.append(job)
+    return decrypted
 
 
 @router.get("/metrics", response_model=QueueMetrics)
@@ -95,6 +98,7 @@ async def get_metrics(
 @router.get("/{job_id}", response_model=Job)
 async def get_job(
     job_id: UUID,
+    request: Request,
     queue: JobQueue = Depends(get_job_queue),
 ) -> Job:
     """Consulta el estado y resultado de un trabajo por su ID."""
@@ -104,4 +108,11 @@ async def get_job(
             status_code=404,
             detail=f"Trabajo {job_id} no encontrado",
         )
+
+    persistence = getattr(request.app.state, "persistence", None)
+    if persistence is not None and job.result and isinstance(job.result.get("findings"), list):
+        data = job.model_dump(mode="json")
+        data["result"] = persistence.decrypt_job_result(job.result)
+        return Job.model_validate(data)
+
     return job

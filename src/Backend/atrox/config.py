@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     llm_validation_max_retries: int = 1
     llm_rejection_log_path: str | None = None
 
+    # Abstracción de proveedores LLM (HU-012 / ADR-005)
+    # "gemini" (Cloud) | "ollama" (local) | "mock" (default: tests/desarrollo)
+    llm_provider: str = "mock"
+    llm_model: str | None = None
+    llm_api_key: str | None = None
+    llm_timeout_seconds: int = 30
+    llm_gemini_model: str = "gemini-2.0-flash"
+    llm_ollama_base_url: str = "http://localhost:11434"
+    llm_ollama_model: str = "llama3"
+    llm_fallback_providers: list[str] = []
+
     # Sincronización diaria de base de amenazas NVD (HU-005 / RF-010)
     nvd_api_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     nvd_api_key: str | None = None

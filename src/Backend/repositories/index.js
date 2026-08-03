@@ -139,6 +139,70 @@ function createRepositories(prismaInstance) {
         }
     };
 
+    const ScheduleRepository = {
+        async createSchedule({ name, target, cronExpression, preset, isActive = true, nextRunAt = null }) {
+            const db = getPrisma();
+            return await db.scheduleRule.create({
+                data: {
+                    name,
+                    target,
+                    cronExpression,
+                    preset,
+                    isActive: isActive !== undefined ? isActive : true,
+                    nextRunAt
+                }
+            });
+        },
+
+        async listSchedules() {
+            const db = getPrisma();
+            return await db.scheduleRule.findMany({
+                orderBy: { createdAt: "desc" }
+            });
+        },
+
+        async getScheduleById(id) {
+            const db = getPrisma();
+            return await db.scheduleRule.findUnique({
+                where: { id }
+            });
+        },
+
+        async updateSchedule(id, data) {
+            const db = getPrisma();
+            return await db.scheduleRule.update({
+                where: { id },
+                data
+            });
+        },
+
+        async toggleScheduleStatus(id, isActive) {
+            const db = getPrisma();
+            return await db.scheduleRule.update({
+                where: { id },
+                data: { isActive }
+            });
+        },
+
+        async deleteSchedule(id) {
+            const db = getPrisma();
+            return await db.scheduleRule.delete({
+                where: { id }
+            });
+        },
+
+        async updateLastRun(id, lastRunAt, nextRunAt = null) {
+            const db = getPrisma();
+            return await db.scheduleRule.update({
+                where: { id },
+                data: {
+                    lastRunAt: lastRunAt || new Date(),
+                    ...(nextRunAt ? { nextRunAt } : {})
+                }
+            });
+        }
+    };
+
     return {
         get prisma() {
             return getPrisma();
@@ -146,7 +210,8 @@ function createRepositories(prismaInstance) {
         ScanRepository,
         AssetRepository,
         FindingRepository,
-        ReportRepository
+        ReportRepository,
+        ScheduleRepository
     };
 }
 
@@ -156,3 +221,4 @@ module.exports = {
     createRepositories,
     ...defaultRepos
 };
+

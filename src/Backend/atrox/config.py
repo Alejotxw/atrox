@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Marcado manual de falsos positivos (HU-022)
     false_positive_store_path: str = "data/false_positives.jsonl"
 
+    # Validación estructurada de respuestas IA (HU-017 / ADR-002)
+    llm_validation_max_retries: int = 1
+    llm_rejection_log_path: str | None = None
+
     # Sincronización diaria de base de amenazas NVD (HU-005 / RF-010)
     nvd_api_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     nvd_api_key: str | None = None

@@ -39,6 +39,9 @@ jobs:
       - name: Run unit tests
         run: pytest tests/ -v -m "not integration"
 
+      - name: Cobertura del validador de respuestas IA (HU-017)
+        run: pytest tests/test_llm_response_validator.py tests/test_validate_api.py tests/test_validate_contract.py -v
+
       - name: Install Nmap y Nuclei (integraci├│n de laboratorio)
         run: |
           sudo apt-get update && sudo apt-get install -y nmap

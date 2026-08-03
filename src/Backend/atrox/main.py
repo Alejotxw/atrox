@@ -14,8 +14,10 @@ from atrox.api.payloads import router as payloads_router
 from atrox.api.scans import router as scans_router
 from atrox.api.scoring import router as scoring_router
 from atrox.api.threats import router as threats_router
+from atrox.api.validate import router as validate_router
 from atrox.api.vectors import router as vectors_router
 from atrox.api.vulnscan import router as vulnscan_router
+from atrox.ai.schemas.rejections import build_rejection_logger
 from atrox.config import get_settings
 from atrox.findings.store import FalsePositiveStore
 from atrox.queue.models import Job, JobType
@@ -74,6 +76,10 @@ async def lifespan(app: FastAPI):
         audit_log = build_audit_log_service()
         await audit_log.purge_expired()
         app.state.audit_log = audit_log
+
+    # Log de rechazos de respuestas IA (HU-017): en memoria por defecto;
+    # persiste a JSONL solo si ATROX_LLM_REJECTION_LOG_PATH está configurado.
+    app.state.llm_rejections = build_rejection_logger(settings.llm_rejection_log_path)
 
     fp_encryptor = None
     if settings.encryption_master_key:
@@ -135,6 +141,7 @@ def create_app() -> FastAPI:
     application.include_router(vectors_router)
     application.include_router(payloads_router)
     application.include_router(scoring_router)
+    application.include_router(validate_router)
     application.include_router(threats_router)
     return application
 

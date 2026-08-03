@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from atrox.api.audit import router as audit_router
+from atrox.api.console import router as console_router
 from atrox.api.credentials import router as credentials_router
 from atrox.api.discovery import router as discovery_router
 from atrox.api.findings import router as findings_router
@@ -19,6 +20,7 @@ from atrox.api.scoring import router as scoring_router
 from atrox.api.vectors import router as vectors_router
 from atrox.api.vulnscan import router as vulnscan_router
 from atrox.config import get_settings
+from atrox.console.bus import get_scan_log_bus
 from atrox.findings.store import FalsePositiveStore
 from atrox.persistence.deps import build_persistence_service
 from atrox.queue.models import Job, JobType
@@ -97,6 +99,7 @@ async def lifespan(app: FastAPI):
         max_queue_size=settings.queue_max_size,
     )
     app.state.job_queue = job_queue
+    app.state.scan_log_bus = get_scan_log_bus()
 
     executor = ProcessPoolExecutor(max_workers=settings.parse_workers)
     await job_queue.start(scanner=_dispatch_scan, executor=executor)
@@ -154,6 +157,7 @@ def create_app() -> FastAPI:
     application.include_router(discovery_router)
     application.include_router(vulnscan_router)
     application.include_router(jobs_router)
+    application.include_router(console_router)
     application.include_router(scans_router)
     application.include_router(audit_router)
     application.include_router(vectors_router)

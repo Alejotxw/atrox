@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     # Cifrado en reposo (HU-007 / ADR-003) — nunca commitear la llave real
     encryption_master_key: str | None = None
+    encrypted_storage_path: str = "data/encrypted"
 
     # Log de auditoría inmutable (HU-008 / ADR-003)
     audit_signing_key: str | None = None

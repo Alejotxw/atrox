@@ -189,3 +189,25 @@ export function markFalsePositive(
     }),
   });
 }
+
+// -- Tipos que reflejan atrox/queue/models.py (HU-004 / listado para HU-019) ---
+
+export type JobType = 'discovery' | 'vulnscan';
+export type JobStatus = 'pending' | 'running' | 'done' | 'failed';
+
+export interface Job {
+  id: string;
+  job_type: JobType;
+  status: JobStatus;
+  params: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+/** Lista todos los trabajos — base para agregar KPIs del dashboard (HU-019). */
+export function listJobs(): Promise<Job[]> {
+  return request<Job[]>('/api/jobs');
+}

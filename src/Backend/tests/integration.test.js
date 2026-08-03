@@ -11,17 +11,17 @@ const TEST_DB_PATH = "./test.db";
 const TEST_DB_URL = `file:${TEST_DB_PATH}`;
 process.env.DATABASE_URL = TEST_DB_URL;
 
-// Ensure database schema is pushed to the test database
-console.log("Aprovisionando base de datos de prueba SQLite...");
+// Ensure database schema is provisioned applying the versioned migrations (same as CI)
+console.log("Aplicando migraciones versionadas a la base de datos de prueba SQLite...");
 try {
-    execSync("npx prisma db push --accept-data-loss", {
+    execSync("npx prisma migrate deploy", {
         env: { ...process.env, DATABASE_URL: TEST_DB_URL },
         cwd: path.join(__dirname, ".."),
         stdio: "pipe"
     });
-    console.log("Base de datos de prueba aprovisionada exitosamente.");
+    console.log("Migraciones aplicadas exitosamente a la base de datos de prueba.");
 } catch (err) {
-    console.error("Error al aprovisionar la base de datos de pruebas:", err.stdout?.toString() || err.message);
+    console.error("Error al aplicar migraciones a la base de datos de pruebas:", err.stdout?.toString() || err.message);
     process.exit(1);
 }
 
@@ -37,8 +37,8 @@ test.after(async () => {
 
     // Clean up test database files
     console.log("Limpiando archivos de base de datos de prueba...");
-    const dbFile = path.join(__dirname, "../prisma/test.db");
-    const dbJournalFile = path.join(__dirname, "../prisma/test.db-journal");
+    const dbFile = path.join(__dirname, "../test.db");
+    const dbJournalFile = path.join(__dirname, "../test.db-journal");
 
     try {
         if (fs.existsSync(dbFile)) {

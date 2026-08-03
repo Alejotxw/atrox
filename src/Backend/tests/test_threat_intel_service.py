@@ -135,13 +135,34 @@ class TestNvdSyncService:
             store_path=tmp_path / "cves.jsonl",
             sync_status_path=tmp_path / "last_sync.json",
         )
-        svc = NvdSyncService(client=FakeNvdClient(entries=[_make_cve("CVE-2021-0001")]), store=store)
+
+        class BlockingNvdClient(FakeNvdClient):
+            """Fake cuyo fetch_changes queda pendiente hasta que el test lo libera.
+
+            Garantiza que la primera sincronización siga en curso (lock retenido)
+            cuando la segunda intenta ejecutarse, haciendo el test determinista.
+            """
+
+            def __init__(self) -> None:
+                super().__init__(entries=[_make_cve("CVE-2021-0001")])
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def fetch_changes(self, since: datetime | None = None) -> list[CVEEntry]:
+                self.last_since = since
+                self.started.set()
+                await self.release.wait()
+                return self.entries
+
+        client = BlockingNvdClient()
+        svc = NvdSyncService(client=client, store=store)
 
         async def scenario() -> None:
             first = asyncio.create_task(svc.sync_once())
-            await asyncio.sleep(0)
+            await client.started.wait()
             with pytest.raises(SyncInProgressError):
                 await svc.sync_once()
+            client.release.set()
             await first
 
         asyncio.run(scenario())

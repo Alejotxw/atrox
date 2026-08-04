@@ -6,7 +6,7 @@ from atrox.security.encryption import EncryptionService
 SENSITIVE_FIELDS: dict[str, frozenset[str]] = {
     "finding": frozenset({"evidence", "poc", "raw_output", "description"}),
     "credential": frozenset({"password", "secret", "token", "private_key"}),
-    "report": frozenset({"content", "executive_summary", "technical_details", "body"}),
+    "report": frozenset({"content", "executive_summary", "business_impact_narrative", "technical_details", "body"}),
 }
 
 

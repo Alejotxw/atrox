@@ -12,6 +12,7 @@ from atrox.api.discovery import router as discovery_router
 from atrox.api.health import router as health_router
 from atrox.api.jobs import router as jobs_router
 from atrox.api.payloads import router as payloads_router
+from atrox.api.reports import router as reports_router
 from atrox.api.scans import router as scans_router
 from atrox.api.scoring import router as scoring_router
 from atrox.api.threats import router as threats_router
@@ -158,6 +159,7 @@ def create_app() -> FastAPI:
     application.include_router(scoring_router)
     application.include_router(validate_router)
     application.include_router(threats_router)
+    application.include_router(reports_router)
     return application
 
 

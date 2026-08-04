@@ -1,18 +1,22 @@
-"""Router REST de generación y exportación de reportes ejecutivos en PDF (HU-023).
+"""Router REST de generación y exportación de reportes ejecutivos (HU-023) y técnicos (HU-024).
 
-Ruta protegida por MFA:
-- `GET /api/reports/executive/{scan_id}`: Genera y descarga el PDF ejecutivo.
+Rutas protegidas por MFA:
+- `GET /api/reports/executive/{scan_id}`: Genera y descarga el PDF ejecutivo (HU-023).
 - `POST /api/reports/executive`: Genera un PDF ejecutivo a partir de datos explícitos.
+- `GET /api/reports/technical/{scan_id}?format=pdf|html`: Genera y descarga el reporte técnico detallado (HU-024).
+- `POST /api/reports/technical?format=pdf|html`: Genera un reporte técnico a partir de datos explícitos.
 """
 
+import re
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from atrox.api.jobs import get_job_queue
 from atrox.queue.service import JobQueue
 from atrox.reports.generator import ExecutiveReportGenerator
-from atrox.reports.models import ExecutiveReportData, SeverityHeatmap, TopRiskItem
+from atrox.reports.models import ExecutiveReportData, SeverityHeatmap, TechnicalFindingItem, TechnicalReportData, TopRiskItem
+from atrox.reports.technical_generator import TechnicalReportGenerator
 from atrox.scanner.models import VulnFinding
 from atrox.security.auth_deps import require_mfa_admin
 
@@ -67,6 +71,76 @@ def _generate_business_impact_narrative(target: str, critical_cnt: int, high_cnt
     return summary, impact
 
 
+def _extract_cves(finding: VulnFinding) -> list[str]:
+    cves = set()
+    cve_pattern = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
+    
+    for tag in finding.tags:
+        found = cve_pattern.findall(tag)
+        for c in found:
+            cves.add(c.upper())
+            
+    for ref in finding.references:
+        found = cve_pattern.findall(ref)
+        for c in found:
+            cves.add(c.upper())
+            
+    if finding.template_id:
+        found = cve_pattern.findall(finding.template_id)
+        for c in found:
+            cves.add(c.upper())
+
+    return sorted(list(cves))
+
+
+def _generate_technical_finding_details(finding: VulnFinding, index: int) -> TechnicalFindingItem:
+    cve_list = _extract_cves(finding)
+    
+    # Evidencia / PoC
+    poc_lines = [
+        f"Petición/Ubicación Objetivo: {finding.matched_at or finding.host}",
+        f"Plantilla Nuclei Identificadora: {finding.template_id}",
+    ]
+    if finding.extracted_results:
+        poc_lines.append("Resultados Extraídos en Escaneo:")
+        poc_lines.extend([f"  - {res}" for res in finding.extracted_results])
+    else:
+        poc_lines.append(f"Respuesta de Verificación: Patrón detectado en {finding.matched_at or finding.host}")
+    
+    poc_evidence = "\n".join(poc_lines)
+
+    # Remediation steps & commands
+    remediation_steps = (
+        "1. Verificar la versión actual del servicio afectado en el servidor objetivo.\n"
+        "2. Aplicar los parches de seguridad del fabricante para resolver las vulnerabilidades reportadas.\n"
+        "3. Restringir el acceso de red a puertos administrativos mediante reglas de Firewall/Security Groups.\n"
+        "4. Re-ejecutar el escaneo de validación automatizado para confirmar la remediación."
+    )
+
+    pkg_name = finding.template_id.split("-")[0] if "-" in finding.template_id else "package"
+    remediation_commands = [
+        f"sudo apt-get update && sudo apt-get install --only-upgrade {pkg_name}",
+        f"sudo systemctl restart {pkg_name} || sudo systemctl reload nginx",
+        f"nuclei -t {finding.template_id} -u {finding.matched_at or finding.host}",
+    ]
+
+    return TechnicalFindingItem(
+        item_id=index,
+        template_id=finding.template_id,
+        name=finding.name,
+        severity=finding.severity.upper(),
+        host=finding.host,
+        matched_at=finding.matched_at,
+        cve_ids=cve_list,
+        tags=finding.tags,
+        description=finding.description or "Vulnerabilidad detectada durante el análisis de seguridad.",
+        poc_evidence=poc_evidence,
+        remediation_steps=remediation_steps,
+        remediation_commands=remediation_commands,
+        references=finding.references,
+    )
+
+
 @router.get("/executive/{scan_id}", response_class=Response)
 async def export_executive_report_pdf(
     scan_id: UUID,
@@ -74,11 +148,7 @@ async def export_executive_report_pdf(
     queue: JobQueue = Depends(get_job_queue),
     user_info: dict = Depends(require_mfa_admin),
 ) -> Response:
-    """Genera y descarga el reporte ejecutivo en PDF para un escaneo específico (HU-023).
-
-    Protegido por autenticación MFA (RF-007 / RNF-002). Cumple con tiempo de
-    respuesta SLA < 10 s (RNF-005).
-    """
+    """Genera y descarga el reporte ejecutivo en PDF para un escaneo específico (HU-023)."""
     job = queue.get_job(scan_id)
     if job is None:
         raise HTTPException(
@@ -93,11 +163,10 @@ async def export_executive_report_pdf(
 
     findings = [VulnFinding(**f) if isinstance(f, dict) else f for f in raw_findings]
 
-    # Conteo por severidad
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     top_items: list[TopRiskItem] = []
 
-    for idx, f in enumerate(findings):
+    for f in findings:
         sev = (f.severity or "info").lower()
         if sev in counts:
             counts[sev] += 1
@@ -121,7 +190,6 @@ async def export_executive_report_pdf(
         info_pct=round((counts["info"] / total_non_zero) * 100, 1),
     )
 
-    # Ordenar hallazgos para top riesgos (critical -> high -> medium -> low)
     sev_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     sorted_findings = sorted(findings, key=lambda x: sev_rank.get(x.severity.lower(), 5))
 
@@ -161,7 +229,6 @@ async def export_executive_report_pdf(
     generator = ExecutiveReportGenerator(report_data)
     pdf_bytes = generator.generate()
 
-    # Registrar auditoría si está disponible
     audit_log = getattr(request.app.state, "audit_log", None)
     if audit_log is not None:
         await audit_log.record(
@@ -206,6 +273,122 @@ async def generate_custom_executive_report_pdf(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="reporte_ejecutivo_{body.scan_id}.pdf"',
+            "X-Report-Template-Version": body.template_version,
+        },
+    )
+
+
+# ── Endpoints del Reporte Técnico (HU-024 / RF-008) ───────────────────────────
+
+
+@router.get("/technical/{scan_id}", response_class=Response)
+async def export_technical_report(
+    scan_id: UUID,
+    request: Request,
+    format: str = Query(default="pdf", pattern="^(pdf|html)$", description="Formato del reporte: pdf o html"),
+    queue: JobQueue = Depends(get_job_queue),
+    user_info: dict = Depends(require_mfa_admin),
+) -> Response:
+    """Genera y descarga el reporte técnico detallado en PDF o HTML (HU-024).
+
+    Incluye evidencias PoC, identificadores CVE, comandos y pasos de remediación.
+    Protegido por autenticación MFA. Cumple SLA < 10 s (RNF-005).
+    """
+    job = queue.get_job(scan_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Escaneo con ID {scan_id} no fue encontrado.",
+        )
+
+    target = job.params.get("target", "Objetivo No Especificado")
+    raw_findings = []
+    if job.result and isinstance(job.result, dict):
+        raw_findings = job.result.get("findings", [])
+
+    findings = [VulnFinding(**f) if isinstance(f, dict) else f for f in raw_findings]
+    tech_findings = [_generate_technical_finding_details(f, idx + 1) for idx, f in enumerate(findings)]
+
+    report_data = TechnicalReportData(
+        scan_id=str(scan_id),
+        target=target,
+        scan_type=job.job_type.value,
+        generated_by=user_info.get("username", "SysAdmin"),
+        total_findings=len(tech_findings),
+        findings=tech_findings,
+    )
+
+    generator = TechnicalReportGenerator(report_data)
+
+    audit_log = getattr(request.app.state, "audit_log", None)
+    if audit_log is not None:
+        await audit_log.record(
+            user=user_info.get("username", "system"),
+            action="report.technical_generated",
+            resource=f"scan:{scan_id}",
+            metadata={"format": format, "template_version": report_data.template_version, "target": target},
+        )
+
+    if format.lower() == "html":
+        html_content = generator.generate_html()
+        filename = f"reporte_tecnico_{scan_id}.html"
+        return Response(
+            content=html_content,
+            media_type="text/html",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Report-Template-Version": report_data.template_version,
+            },
+        )
+
+    pdf_bytes = generator.generate_pdf()
+    filename = f"reporte_tecnico_{scan_id}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Report-Template-Version": report_data.template_version,
+        },
+    )
+
+
+@router.post("/technical", response_class=Response)
+async def generate_custom_technical_report(
+    body: TechnicalReportData,
+    request: Request,
+    format: str = Query(default="pdf", pattern="^(pdf|html)$"),
+    user_info: dict = Depends(require_mfa_admin),
+) -> Response:
+    """Genera un reporte técnico en PDF o HTML a partir de datos explícitos (HU-024)."""
+    generator = TechnicalReportGenerator(body)
+
+    audit_log = getattr(request.app.state, "audit_log", None)
+    if audit_log is not None:
+        await audit_log.record(
+            user=user_info.get("username", "system"),
+            action="report.custom_technical_generated",
+            resource=f"scan:{body.scan_id}",
+            metadata={"format": format, "template_version": body.template_version, "target": body.target},
+        )
+
+    if format.lower() == "html":
+        html_content = generator.generate_html()
+        return Response(
+            content=html_content,
+            media_type="text/html",
+            headers={
+                "Content-Disposition": f'attachment; filename="reporte_tecnico_{body.scan_id}.html"',
+                "X-Report-Template-Version": body.template_version,
+            },
+        )
+
+    pdf_bytes = generator.generate_pdf()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="reporte_tecnico_{body.scan_id}.pdf"',
             "X-Report-Template-Version": body.template_version,
         },
     )

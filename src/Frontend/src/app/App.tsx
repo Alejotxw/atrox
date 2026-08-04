@@ -38,6 +38,7 @@ import {
   getScanDetail,
   analyzeVectors,
   downloadExecutiveReportPdf,
+  downloadTechnicalReport,
   getHealth,
   getMeApi,
   logoutApi,
@@ -349,6 +350,21 @@ export default function App() {
     }
   };
 
+  const handleExportTechnical = async (format: 'pdf' | 'html') => {
+    if (!lastScanId) {
+      alert('Ejecute una auditoría o escaneo de seguridad antes de exportar el reporte técnico.');
+      return;
+    }
+    setIsExportingPdf(true);
+    try {
+      await downloadTechnicalReport(lastScanId, format);
+    } catch (err) {
+      alert(`Error al exportar reporte técnico (${format.toUpperCase()}): ${describeError(err)}`);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   // --- VALIDAR VULNERABILIDAD MANUALMENTE EN TABLA ---
   const handleValidateFinding = (id: string) => {
     setFindings(prev => prev.map(f => f.id === id && f.status === 'unchecked' ? { ...f, status: 'checked' } : f));
@@ -476,20 +492,33 @@ export default function App() {
             <button
               onClick={handleExportPdf}
               disabled={isExportingPdf || !lastScanId}
-              className="bg-gradient-to-r from-[#3182CE] to-[#2B6CB0] hover:from-[#2B6CB0] hover:to-[#2C5282] disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all shadow-md border border-blue-500/30"
+              className="bg-gradient-to-r from-[#3182CE] to-[#2B6CB0] hover:from-[#2B6CB0] hover:to-[#2C5282] disabled:opacity-50 disabled:cursor-not-allowed text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md border border-blue-500/30"
               title="Exportar reporte ejecutivo resumido en PDF para Directores de TI (HU-023)"
             >
               {isExportingPdf ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Generando PDF...
-                </>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
               ) : (
-                <>
-                  <FileText className="w-4 h-4" />
-                  Exportar PDF Ejecutivo
-                </>
+                <FileText className="w-3.5 h-3.5" />
               )}
+              Reporte Ejecutivo PDF
+            </button>
+            <button
+              onClick={() => handleExportTechnical('pdf')}
+              disabled={isExportingPdf || !lastScanId}
+              className="bg-gradient-to-r from-[#2D3748] to-[#1A202C] hover:from-[#1A202C] hover:to-[#0F172A] disabled:opacity-50 disabled:cursor-not-allowed text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md border border-slate-600/40"
+              title="Exportar reporte técnico detallado en PDF con PoC y comandos de remediación para SysAdmins (HU-024)"
+            >
+              <Terminal className="w-3.5 h-3.5 text-purple-400" />
+              Reporte Técnico PDF
+            </button>
+            <button
+              onClick={() => handleExportTechnical('html')}
+              disabled={isExportingPdf || !lastScanId}
+              className="bg-gradient-to-r from-[#0D9488] to-[#0F766E] hover:from-[#0F766E] hover:to-[#115E59] disabled:opacity-50 disabled:cursor-not-allowed text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md border border-teal-500/30"
+              title="Exportar reporte técnico interactivo en HTML con PoC y comandos para SysAdmins (HU-024)"
+            >
+              <Zap className="w-3.5 h-3.5 text-teal-300" />
+              Reporte Técnico HTML
             </button>
           </div>
         </header>

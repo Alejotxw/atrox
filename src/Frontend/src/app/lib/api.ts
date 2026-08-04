@@ -21,10 +21,40 @@ export class ApiError extends Error {
   }
 }
 
+export function describeError(err: unknown): string {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+let activeSessionToken: string | null = sessionStorage.getItem('atrox_session_token');
+
+export function setAuthToken(token: string | null): void {
+  activeSessionToken = token;
+  if (token) {
+    sessionStorage.setItem('atrox_session_token', token);
+  } else {
+    sessionStorage.removeItem('atrox_session_token');
+  }
+}
+
+export function getAuthToken(): string | null {
+  return activeSessionToken;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(init?.headers as Record<string, string> ?? {}),
+  };
+
+  if (activeSessionToken && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${activeSessionToken}`;
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers,
   });
 
   if (!response.ok) {
@@ -39,6 +69,63 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+// -- Tipos que reflejan atrox/api/auth.py (HU-018) ------------------------------
+
+export interface LoginStep1Response {
+  mfa_required: boolean;
+  mfa_token: string;
+  message: string;
+}
+
+export interface MfaVerifyResponse {
+  session_token: string;
+  expires_in_minutes: number;
+  user: {
+    username: string;
+    role: string;
+  };
+}
+
+export interface MfaSetupResponse {
+  username: string;
+  secret: string;
+  otpauth_url: string;
+}
+
+export interface UserStatusResponse {
+  username: string;
+  expires_at: number;
+  seconds_remaining: number;
+}
+
+export function loginApi(username: string, password: string): Promise<LoginStep1Response> {
+  return request<LoginStep1Response>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function verifyMfaApi(mfaToken: string, code: string): Promise<MfaVerifyResponse> {
+  return request<MfaVerifyResponse>('/api/auth/mfa/verify', {
+    method: 'POST',
+    body: JSON.stringify({ mfa_token: mfaToken, code }),
+  });
+}
+
+export function getMfaSetupApi(): Promise<MfaSetupResponse> {
+  return request<MfaSetupResponse>('/api/auth/mfa/setup');
+}
+
+export function getMeApi(): Promise<UserStatusResponse> {
+  return request<UserStatusResponse>('/api/auth/me');
+}
+
+export function logoutApi(): Promise<{ message: string }> {
+  return request<{ message: string }>('/api/auth/logout', {
+    method: 'POST',
+  });
 }
 
 // -- Tipos que reflejan atrox/scanner/models.py --------------------------------

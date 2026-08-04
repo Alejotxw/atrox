@@ -26,14 +26,22 @@ import {
   Zap,
   Target,
   Terminal,
-  ListFilter
+  ListFilter,
+  LogOut,
+  QrCode,
+  UserCheck
 } from 'lucide-react';
 import FindingsManagementView from './components/findings/FindingsManagementView';
+import LoginForm from './components/auth/LoginForm';
 import {
   createScan,
   getScanDetail,
   analyzeVectors,
   getHealth,
+  getMeApi,
+  logoutApi,
+  setAuthToken,
+  getAuthToken,
   ApiError,
   type AttackVector,
   type ScanDetailResponse,
@@ -132,6 +140,10 @@ const INITIAL_FINDINGS: FindingRow[] = [
 
 export default function App() {
   // --- ESTADOS INTERACTIVOS ---
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!getAuthToken());
+  const [authenticatedUser, setAuthenticatedUser] = useState<string>('sysadmin');
+  const [sessionRemaining, setSessionRemaining] = useState<number | null>(null);
+
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [targetUrl, setTargetUrl] = useState('corp.internal.uide.edu.ec');
   const [isAuditing, setIsAuditing] = useState(false);
@@ -145,6 +157,38 @@ export default function App() {
 
   const logsEndRef = useRef<HTMLDivElement>(null);
   const auditRunIdRef = useRef(0);
+
+  // --- VERIFICACIÓN DE SESIÓN MFA ACTIVA ---
+  useEffect(() => {
+    if (!getAuthToken()) {
+      setIsAuthenticated(false);
+      return;
+    }
+
+    const checkSession = async () => {
+      try {
+        const res = await getMeApi();
+        setAuthenticatedUser(res.username);
+        setSessionRemaining(res.seconds_remaining);
+        setIsAuthenticated(true);
+      } catch {
+        setAuthToken(null);
+        setIsAuthenticated(false);
+      }
+    };
+    checkSession();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await logoutApi();
+    } catch {
+      // Ignorar si falla la revocación en backend
+    } finally {
+      setAuthToken(null);
+      setIsAuthenticated(false);
+    }
+  };
 
   // --- AUTO-SCROLL DE LA CONSOLA ---
   useEffect(() => {
@@ -291,6 +335,10 @@ export default function App() {
     setFindings(prev => prev.map(f => f.id === id && f.status === 'unchecked' ? { ...f, status: 'checked' } : f));
   };
 
+  if (!isAuthenticated) {
+    return <LoginForm onSuccess={(user) => { setAuthenticatedUser(user); setIsAuthenticated(true); }} />;
+  }
+
   return (
     <div className="flex h-screen w-full bg-[#0F172A] text-slate-300 font-sans overflow-hidden">
       
@@ -323,14 +371,26 @@ export default function App() {
         </div>
 
         <div className="p-5 border-t border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
-              <span className="text-xs font-bold text-white">AD</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#7A1C3E]/20 flex items-center justify-center border border-[#7A1C3E]/40 text-[#D4AF37]">
+                <UserCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-white tracking-wide">{authenticatedUser}</p>
+                <p className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  MFA Activo (Root)
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-medium text-white">Admin SecOps</p>
-              <p className="text-xs text-slate-500">Nivel de Acceso: Root</p>
-            </div>
+            <button
+              onClick={handleLogout}
+              title="Cerrar Sesión MFA"
+              className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all border border-transparent hover:border-red-500/20"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </aside>

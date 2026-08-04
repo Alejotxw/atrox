@@ -43,7 +43,9 @@ def e2e_client(tmp_path: Path):
     app.dependency_overrides[get_false_positive_store] = lambda: fp_store
     app.state.audit_log = audit_service
 
-    yield TestClient(app), queue, audit_service
+    client = TestClient(app)
+    client.headers["Authorization"] = "Bearer test-audit-token"
+    yield client, queue, audit_service
 
     app.state.audit_log = None
     app.dependency_overrides.clear()

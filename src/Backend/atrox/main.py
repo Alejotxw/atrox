@@ -3,10 +3,11 @@ from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from atrox.api.audit import router as audit_router
+from atrox.api.auth import router as auth_router
 from atrox.api.discovery import router as discovery_router
 from atrox.api.health import router as health_router
 from atrox.api.jobs import router as jobs_router
@@ -25,7 +26,9 @@ from atrox.queue.service import JobQueue
 from atrox.scanner.nmap_wrapper import NmapWrapper
 from atrox.scanner.nuclei_wrapper import NucleiWrapper
 from atrox.security.audit_deps import build_audit_log_service
+from atrox.security.auth_deps import require_mfa_admin
 from atrox.security.deps import get_encryption_service_from_settings
+from atrox.security.mfa_service import MfaService
 from atrox.security.sensitive_fields import SensitiveFieldEncryptor
 from atrox.threat_intel.service import build_nvd_sync_service
 
@@ -61,6 +64,17 @@ async def _dispatch_scan(job: Job) -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+
+    # Servicio MFA (HU-018)
+    mfa_service = MfaService(
+        admin_username=settings.admin_username,
+        admin_password=settings.admin_password,
+        totp_secret=settings.totp_secret,
+        session_ttl_minutes=settings.session_ttl_minutes,
+        max_failed_attempts=settings.mfa_max_failed_attempts,
+        lockout_minutes=settings.mfa_lockout_minutes,
+    )
+    app.state.mfa_service = mfa_service
 
     job_queue = JobQueue(
         max_concurrent=settings.max_concurrent_scans,
@@ -133,11 +147,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(health_router)
+    application.include_router(auth_router)
     application.include_router(discovery_router)
     application.include_router(vulnscan_router)
     application.include_router(jobs_router)
     application.include_router(scans_router)
-    application.include_router(audit_router)
+    application.include_router(audit_router, dependencies=[Depends(require_mfa_admin)])
     application.include_router(vectors_router)
     application.include_router(payloads_router)
     application.include_router(scoring_router)

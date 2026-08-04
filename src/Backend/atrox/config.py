@@ -73,6 +73,15 @@ class Settings(BaseSettings):
     nvd_store_path: str = "data/threat_intel/cves.jsonl"
     nvd_sync_status_path: str = "data/threat_intel/last_sync.json"
 
+    # Autenticación MFA para panel de administración (HU-018 / RNF-002)
+    admin_username: str = "sysadmin"
+    admin_password: str = "AtroxAdmin2026!"
+    totp_secret: str | None = None
+    session_ttl_minutes: int = 60
+    mfa_max_failed_attempts: int = 5
+    mfa_lockout_minutes: int = 15
+    mfa_required: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

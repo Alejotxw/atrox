@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ShieldAlert, KeyRound, Lock, ArrowRight, Loader2, AlertTriangle, QrCode, CheckCircle2, ShieldCheck } from 'lucide-react';
+import QRCode from 'qrcode';
 import { loginApi, verifyMfaApi, getMfaSetupApi, setAuthToken, describeError } from '../../lib/api';
 
 interface LoginFormProps {
@@ -17,6 +18,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [setupData, setSetupData] = useState<{ secret: string; otpauth_url: string } | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   // Paso 1: Autenticación de credenciales
   const handlePrimaryLogin = async (e: React.FormEvent) => {
@@ -59,6 +61,15 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
       const data = await getMfaSetupApi();
       setSetupData({ secret: data.secret, otpauth_url: data.otpauth_url });
       setShowSetupModal(true);
+      setQrDataUrl(null);
+      // El QR se genera 100% en el cliente (nunca se envía el secreto a un
+      // tercero) — sirve al propio otpauth_url ya devuelto por el backend.
+      const dataUrl = await QRCode.toDataURL(data.otpauth_url, {
+        width: 220,
+        margin: 1,
+        color: { dark: '#0B1121', light: '#F1F5F9' },
+      });
+      setQrDataUrl(dataUrl);
     } catch (err: any) {
       alert("Error cargando configuración MFA: " + describeError(err));
     }
@@ -70,7 +81,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#7A1C3E]/20 rounded-full blur-3xl pointer-events-none"></div>
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-900/15 rounded-full blur-3xl pointer-events-none"></div>
 
-      <div className="w-full max-w-md bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-8 shadow-2xl relative z-10">
+      <div className="w-full max-w-md bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl relative z-10">
         
         {/* Header Branding */}
         <div className="flex items-center gap-4 mb-8">
@@ -204,16 +215,30 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
               </div>
               <h3 className="text-white font-bold text-base">Configuración Inicial TOTP</h3>
               <p className="text-xs text-slate-400">
-                Escanee en su aplicación autenticadora (Google Authenticator / Authy) o copie la siguiente clave secreta Base32:
+                Escanee este código con Google Authenticator, Authy o similar:
               </p>
-              
+
+              <div className="flex justify-center">
+                {qrDataUrl ? (
+                  <img
+                    src={qrDataUrl}
+                    alt="Código QR para configurar TOTP"
+                    className="rounded-xl border border-slate-700 w-[220px] h-[220px]"
+                  />
+                ) : (
+                  <div className="w-[220px] h-[220px] flex items-center justify-center bg-[#0B1121] rounded-xl border border-slate-800">
+                    <Loader2 className="w-6 h-6 text-slate-500 animate-spin" />
+                  </div>
+                )}
+              </div>
+
+              <p className="text-xs text-slate-400">
+                ¿No puede escanear? Ingrese esta clave manualmente:
+              </p>
+
               <div className="bg-[#0B1121] p-3 rounded-xl border border-slate-800 font-mono text-xs text-[#D4AF37] select-all break-all">
                 {setupData.secret}
               </div>
-
-              <p className="text-[11px] text-slate-500 italic">
-                URI OTPAuth: {setupData.otpauth_url}
-              </p>
 
               <button
                 onClick={() => setShowSetupModal(false)}

@@ -26,8 +26,19 @@ class Settings(BaseSettings):
     nmap_path: str = "nmap"
     nmap_timeout_seconds: int = 300
     nuclei_path: str = "nuclei"
-    nuclei_timeout_seconds: int = 300
+    # 480s (8min) da margen para la primera corrida antes de que el volumen
+    # de plantillas esté "caliente" — con el volumen ya poblado, escaneos
+    # posteriores terminan en una fracción de este tiempo.
+    nuclei_timeout_seconds: int = 480
     nuclei_sandbox_templates: str | None = None
+    # Si se define, Nuclei corre vía `docker run --rm -i <imagen>` en vez del
+    # binario nativo (ej. "projectdiscovery/nuclei:latest") — útil cuando un
+    # antivirus bloquea el ejecutable nativo de Nuclei en Windows.
+    nuclei_docker_image: str | None = None
+    # Volumen con nombre donde persiste nuclei-templates entre ejecuciones en
+    # modo Docker — sin esto, cada contenedor `--rm` re-descarga el catálogo
+    # completo (varios minutos) en cada escaneo. None desactiva el montaje.
+    nuclei_docker_templates_volume: str | None = "atrox-nuclei-templates"
 
     # Cola de trabajos (HU-004)
     max_concurrent_scans: int = 10

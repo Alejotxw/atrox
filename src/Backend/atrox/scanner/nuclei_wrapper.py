@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import subprocess
+import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -90,6 +92,9 @@ def parse_nuclei_jsonl(output: str) -> list[VulnFinding]:
     return findings
 
 
+OnCommand = Callable[[list[str]], Awaitable[None]]
+
+
 class NucleiWrapper:
     """Wrapper asincrono de Nuclei para escaneo de vulnerabilidades."""
 
@@ -99,11 +104,43 @@ class NucleiWrapper:
         timeout_seconds: int = 300,
         sandbox_templates: str | None = None,
         runner: NucleiRunner | None = None,
+        on_command: OnCommand | None = None,
+        docker_image: str | None = None,
+        docker_templates_volume: str | None = "atrox-nuclei-templates",
     ) -> None:
         self.nuclei_path = nuclei_path
         self.timeout_seconds = timeout_seconds
         self.sandbox_templates = sandbox_templates
         self._runner = runner
+        self._on_command = on_command
+        self._docker_image = docker_image
+        self._docker_templates_volume = docker_templates_volume
+        self._docker_container_name: str | None = None
+
+    def _base_command(self) -> list[str]:
+        """Comando base antes de los flags de Nuclei.
+
+        Si `docker_image` está configurado, corre Nuclei dentro de un
+        contenedor (`docker run --rm -i --name <id> <imagen>`) en vez del
+        binario nativo — evita por completo el filtrado de antivirus de
+        Windows sobre el ejecutable, a costa de requerir Docker Desktop
+        corriendo. El volumen con nombre persiste `nuclei-templates` entre
+        ejecuciones — sin esto, cada contenedor `--rm` re-descarga el
+        catálogo completo de plantillas en cada escaneo (varios minutos).
+        El nombre del contenedor se fija una sola vez por escaneo para poder
+        detenerlo explícitamente si se agota el timeout (ver `_run_subprocess_blocking`).
+        """
+        if not self._docker_image:
+            return [self.nuclei_path]
+
+        if self._docker_container_name is None:
+            self._docker_container_name = f"atrox-nuclei-{uuid.uuid4().hex[:12]}"
+
+        command = ["docker", "run", "--rm", "-i", "--name", self._docker_container_name]
+        if self._docker_templates_volume:
+            command.extend(["-v", f"{self._docker_templates_volume}:/root/nuclei-templates"])
+        command.append(self._docker_image)
+        return command
 
     async def scan(
         self,
@@ -112,6 +149,7 @@ class NucleiWrapper:
         severities: list[str] | None = None,
         tags: list[str] | None = None,
     ) -> VulnScanResult:
+        self._docker_container_name = None
         args = ["-u", target, "-jsonl", "-silent", "-nc", "-or"]
 
         if templates and self.sandbox_templates:
@@ -132,15 +170,19 @@ class NucleiWrapper:
         if tags:
             args.extend(["-tags", ",".join(tags)])
 
+        if self._on_command is not None:
+            await self._on_command([*self._base_command(), *args])
+
         try:
             return_code, stdout, stderr = await self._execute(args)
         except FileNotFoundError:
             logger.exception("Nuclei no encontrado en el sistema")
-            return VulnScanResult(
-                target=target,
-                status=ScanStatus.ERROR,
-                error="Nuclei no encontrado. Instale Nuclei o configure ATROX_NUCLEI_PATH.",
+            error = (
+                "Docker no encontrado. Instale Docker Desktop o desactive ATROX_NUCLEI_DOCKER_IMAGE."
+                if self._docker_image
+                else "Nuclei no encontrado. Instale Nuclei o configure ATROX_NUCLEI_PATH."
             )
+            return VulnScanResult(target=target, status=ScanStatus.ERROR, error=error)
         except (asyncio.TimeoutError, TimeoutError):
             logger.warning("Timeout escaneando %s", target)
             return VulnScanResult(
@@ -153,7 +195,7 @@ class NucleiWrapper:
             return VulnScanResult(
                 target=target,
                 status=ScanStatus.ERROR,
-                error=str(exc),
+                error=str(exc) or f"{type(exc).__name__} sin mensaje (ver logs del servidor)",
             )
 
         if not stdout.strip() and return_code != 0:
@@ -179,28 +221,58 @@ class NucleiWrapper:
                 timeout=self.timeout_seconds,
             )
 
-        process = await asyncio.create_subprocess_exec(
-            self.nuclei_path,
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._run_subprocess_blocking, args)
 
+    def _run_subprocess_blocking(self, args: list[str]) -> tuple[int, str, str]:
+        """Ejecuta Nuclei de forma síncrona/bloqueante en un hilo del executor.
+
+        `asyncio.create_subprocess_exec` no funciona bajo `SelectorEventLoop`
+        (el loop que uvicorn usa en Windows cuando corre con `--reload` o
+        `--workers > 1`, ver `Config.use_subprocess` en uvicorn) — lanza
+        `NotImplementedError`. `subprocess.Popen` sí funciona en cualquier
+        tipo de event loop porque no depende de su soporte de subprocesos;
+        al correr en un hilo aparte, no bloquea el loop de asyncio.
+        """
+        process = subprocess.Popen(
+            [*self._base_command(), *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.timeout_seconds,
-            )
-        except asyncio.TimeoutError:
+            stdout_bytes, stderr_bytes = process.communicate(timeout=self.timeout_seconds)
+        except subprocess.TimeoutExpired:
             process.kill()
-            await process.wait()
-            raise
+            process.communicate()
+            if self._docker_image and self._docker_container_name:
+                self._kill_docker_container(self._docker_container_name)
+            raise TimeoutError(
+                f"El escaneo excedio el tiempo limite de {self.timeout_seconds}s"
+            ) from None
 
         return (
             process.returncode or 0,
             stdout_bytes.decode(errors="replace"),
             stderr_bytes.decode(errors="replace"),
         )
+
+    def _kill_docker_container(self, name: str) -> None:
+        """Detiene el contenedor Docker explícitamente al agotar el timeout.
+
+        Matar el proceso local `docker run` (`Popen.kill`) en Windows no le
+        avisa al daemon de Docker que detenga el contenedor — queda huérfano
+        corriendo indefinidamente y sigue consumiendo CPU/red. Hay que
+        detenerlo por su nombre explícitamente.
+        """
+        try:
+            subprocess.run(
+                ["docker", "kill", name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except Exception:
+            logger.exception("No se pudo detener el contenedor Docker huérfano %s", name)
 
     def _parse_jsonl(self, output: str) -> list[VulnFinding]:
         """Delega al parse a nivel de modulo para compatibilidad."""

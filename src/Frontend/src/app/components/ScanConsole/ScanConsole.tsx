@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { TerminalSquare } from 'lucide-react';
 
-import { startConsoleDemo } from '../../lib/api';
 import {
   formatLogTime,
   moduleColorClass,
@@ -18,7 +17,7 @@ const MAX_LINES = 500;
 
 export interface ScanConsoleProps {
   targetUrl: string;
-  /** Cuando pasa a true, limpia y dispara demo simulada en el backend. */
+  /** Cuando cambia (nueva auditoría real), limpia la pantalla de la consola. */
   auditToken?: number;
   isAuditing?: boolean;
 }
@@ -61,32 +60,14 @@ export default function ScanConsole({
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs, autoScroll]);
 
+  // Limpia la pantalla al iniciar una auditoría nueva; los eventos reales
+  // (encolado/iniciado/completado/fallido + detalle de Nmap/Nuclei) llegan
+  // solos por el stream SSE en cuanto el job real se procesa — no hay nada
+  // que "disparar" desde el frontend.
   useEffect(() => {
     if (!auditToken) return;
-    let cancelled = false;
-    (async () => {
-      setLogs([]);
-      try {
-        await startConsoleDemo(targetUrl || 'lab.local');
-      } catch (err) {
-        if (cancelled) return;
-        setLogs((prev) => [
-          ...prev,
-          {
-            id: `local-error-${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            module: 'ERROR',
-            severity: 'error',
-            message: err instanceof Error ? err.message : 'No se pudo iniciar la demo SSE',
-            job_id: null,
-          },
-        ]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [auditToken, targetUrl]);
+    setLogs([]);
+  }, [auditToken]);
 
   const conn = statusLabel(status);
 
@@ -120,7 +101,7 @@ export default function ScanConsole({
       </div>
       <div
         ref={containerRef}
-        className="p-6 font-mono text-[13px] text-slate-300 leading-relaxed overflow-y-auto h-[420px] space-y-1.5 z-10 scroll-smooth"
+        className="p-4 sm:p-6 font-mono text-[13px] text-slate-300 leading-relaxed overflow-y-auto h-[280px] sm:h-[420px] space-y-3 z-10 scroll-smooth"
       >
         <div className="text-slate-500">
           root@ai-pentest:~# ./run_audit.sh --target {targetUrl}
@@ -130,7 +111,7 @@ export default function ScanConsole({
           return (
             <div
               key={log.id}
-              className="text-slate-500 animate-in fade-in slide-in-from-bottom-2 duration-300"
+              className="text-slate-500 py-0.5 animate-in fade-in slide-in-from-bottom-2 duration-300"
             >
               [{formatLogTime(log.timestamp)}]{' '}
               <span className={`${moduleColorClass(log.module)} font-semibold`}>

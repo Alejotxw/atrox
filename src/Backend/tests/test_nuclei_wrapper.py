@@ -2,6 +2,8 @@
 
 import asyncio
 import os
+import subprocess
+import sys
 import tempfile
 
 import pytest
@@ -238,6 +240,28 @@ class TestNucleiWrapperSeverityFilter:
         tags_index = args.index("-tags")
         assert args[tags_index + 1] == "cve,apache"
 
+    def test_scan_invokes_on_command_with_real_args_before_running(self) -> None:
+        captured: list[list[str]] = []
+
+        async def on_command(args: list[str]) -> None:
+            captured.append(args)
+
+        async def mock_runner(_args: list[str]) -> tuple[int, str, str]:
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(
+            nuclei_path="nuclei",
+            runner=mock_runner,
+            on_command=on_command,
+        )
+        asyncio.run(wrapper.scan("192.168.1.10", severities=["critical"]))
+
+        assert len(captured) == 1
+        command = captured[0]
+        assert command[0] == "nuclei"
+        assert "-u" in command
+        assert "192.168.1.10" in command
+
 
 class TestNucleiWrapperMalformedJSONL:
     """Scenario: Malformed JSONL line in output."""
@@ -372,3 +396,178 @@ class TestNucleiWrapperCLIArgs:
         assert "-silent" in args
         assert "-nc" in args
         assert "-or" in args
+
+
+class TestRealSubprocessPath:
+    """Sin `runner` inyectado: usa subprocess.Popen bloqueante en un hilo del
+    executor (no asyncio.create_subprocess_exec) — funciona incluso bajo
+    SelectorEventLoop, el loop que uvicorn usa en Windows con --reload."""
+
+    def test_execute_runs_real_subprocess_and_captures_output(self) -> None:
+        wrapper = NucleiWrapper(nuclei_path=sys.executable, timeout_seconds=5)
+
+        return_code, stdout, stderr = asyncio.run(
+            wrapper._execute(["-c", "import sys; print('ok'); sys.exit(0)"])
+        )
+
+        assert return_code == 0
+        assert "ok" in stdout
+
+    def test_execute_raises_file_not_found_for_missing_binary(self) -> None:
+        wrapper = NucleiWrapper(
+            nuclei_path="definitely-not-a-real-binary-xyz123", timeout_seconds=5
+        )
+
+        with pytest.raises(FileNotFoundError):
+            asyncio.run(wrapper._execute(["--version"]))
+
+    def test_execute_raises_timeout_error_when_process_hangs(self) -> None:
+        wrapper = NucleiWrapper(nuclei_path=sys.executable, timeout_seconds=1)
+
+        with pytest.raises(asyncio.TimeoutError):
+            asyncio.run(
+                wrapper._execute(["-c", "import time; time.sleep(5)"])
+            )
+
+
+class TestDockerMode:
+    """Cuando `docker_image` está configurado, Nuclei corre vía
+    `docker run --rm -i <imagen>` en vez del binario nativo — evita que un
+    antivirus bloquee el ejecutable de Nuclei en Windows."""
+
+    def test_base_command_uses_docker_when_image_configured(self) -> None:
+        wrapper = NucleiWrapper(
+            docker_image="projectdiscovery/nuclei:latest", docker_templates_volume=None
+        )
+
+        assert wrapper._base_command() == [
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            "--name",
+            wrapper._docker_container_name,
+            "projectdiscovery/nuclei:latest",
+        ]
+
+    def test_base_command_uses_native_path_without_docker_image(self) -> None:
+        wrapper = NucleiWrapper(nuclei_path="nuclei")
+
+        assert wrapper._base_command() == ["nuclei"]
+
+    def test_base_command_mounts_templates_volume_by_default(self) -> None:
+        wrapper = NucleiWrapper(docker_image="projectdiscovery/nuclei:latest")
+
+        command = wrapper._base_command()
+
+        assert "-v" in command
+        v_index = command.index("-v")
+        assert command[v_index + 1] == "atrox-nuclei-templates:/root/nuclei-templates"
+
+    def test_base_command_respects_custom_volume_name(self) -> None:
+        wrapper = NucleiWrapper(
+            docker_image="projectdiscovery/nuclei:latest",
+            docker_templates_volume="my-custom-volume",
+        )
+
+        command = wrapper._base_command()
+
+        v_index = command.index("-v")
+        assert command[v_index + 1] == "my-custom-volume:/root/nuclei-templates"
+
+    def test_base_command_container_name_stable_within_same_scan(self) -> None:
+        wrapper = NucleiWrapper(docker_image="projectdiscovery/nuclei:latest")
+
+        first_call = wrapper._base_command()
+        second_call = wrapper._base_command()
+
+        assert first_call == second_call
+
+    def test_scan_generates_fresh_container_name_each_call(self) -> None:
+        async def mock_runner(_args: list[str]) -> tuple[int, str, str]:
+            return 0, "", ""
+
+        async def on_command(_args: list[str]) -> None:
+            pass  # solo dispara _base_command() para fijar el nombre del contenedor
+
+        wrapper = NucleiWrapper(
+            runner=mock_runner,
+            on_command=on_command,
+            docker_image="projectdiscovery/nuclei:latest",
+        )
+
+        asyncio.run(wrapper.scan("192.168.1.10"))
+        first_name = wrapper._docker_container_name
+        asyncio.run(wrapper.scan("192.168.1.11"))
+        second_name = wrapper._docker_container_name
+
+        assert first_name is not None
+        assert second_name is not None
+        assert first_name != second_name
+
+    def test_on_command_receives_docker_prefixed_command(self) -> None:
+        captured: list[list[str]] = []
+
+        async def on_command(args: list[str]) -> None:
+            captured.append(args)
+
+        async def mock_runner(_args: list[str]) -> tuple[int, str, str]:
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(
+            runner=mock_runner,
+            on_command=on_command,
+            docker_image="projectdiscovery/nuclei:latest",
+        )
+        asyncio.run(wrapper.scan("192.168.1.10"))
+
+        assert len(captured) == 1
+        command = captured[0]
+        assert command[0] == "docker"
+        assert "projectdiscovery/nuclei:latest" in command
+        assert "-u" in command
+        assert "192.168.1.10" in command
+
+    def test_kills_orphaned_container_on_timeout(self, monkeypatch) -> None:
+        killed: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            killed.append(cmd)
+
+        class FakeProcess:
+            def __init__(self) -> None:
+                self._calls = 0
+
+            def communicate(self, timeout=None):
+                self._calls += 1
+                if self._calls == 1:
+                    raise subprocess.TimeoutExpired(cmd="docker", timeout=timeout)
+                return b"", b""
+
+            def kill(self) -> None:
+                pass
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: FakeProcess())
+
+        wrapper = NucleiWrapper(docker_image="projectdiscovery/nuclei:latest", timeout_seconds=1)
+
+        with pytest.raises(TimeoutError):
+            wrapper._run_subprocess_blocking(["-u", "192.168.1.10"])
+
+        assert len(killed) == 1
+        assert killed[0] == ["docker", "kill", wrapper._docker_container_name]
+
+    def test_scan_error_message_mentions_docker_when_docker_mode(self) -> None:
+        async def missing_binary_runner(_args: list[str]) -> tuple[int, str, str]:
+            raise FileNotFoundError("docker not found")
+
+        wrapper = NucleiWrapper(
+            runner=missing_binary_runner,
+            docker_image="projectdiscovery/nuclei:latest",
+        )
+
+        result = asyncio.run(wrapper.scan("192.168.1.10"))
+
+        assert result.status == ScanStatus.ERROR
+        assert "Docker" in result.error

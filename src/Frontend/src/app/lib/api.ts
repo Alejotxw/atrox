@@ -260,12 +260,28 @@ export interface VectorAnalysisResult {
   total_findings: number;
   analysis_time_ms: number;
   within_sla: boolean;
+  source: 'llm' | 'heuristic';
+  model_used: string | null;
 }
 
 export function analyzeVectors(findings: VulnFinding[]): Promise<VectorAnalysisResult> {
   return request<VectorAnalysisResult>('/api/ai/vectors/analyze', {
     method: 'POST',
     body: JSON.stringify({ findings }),
+  });
+}
+
+// -- Chat de IA sobre hallazgos (Motor Ollama IA) ------------------------------
+
+export interface ChatResponse {
+  response: string;
+  model_used: string;
+}
+
+export function sendChatMessage(message: string, context?: string): Promise<ChatResponse> {
+  return request<ChatResponse>('/api/ai/chat', {
+    method: 'POST',
+    body: JSON.stringify({ message, context: context ?? null }),
   });
 }
 
@@ -404,16 +420,6 @@ export function listJobs(): Promise<Job[]> {
 }
 
 // -- Consola en vivo SSE (HU-020) ---------------------------------------------
-
-export interface ConsoleSimulateResponse {
-  status: string;
-  target: string;
-}
-
-/** Dispara una demo simulada que emite logs por GET /api/console/stream. */
-export function startConsoleDemo(target: string): Promise<ConsoleSimulateResponse> {
-  return request<ConsoleSimulateResponse>('/api/console/simulate', {
-    method: 'POST',
-    body: JSON.stringify({ target }),
-  });
-}
+// El stream se consume directamente vía GET /api/console/stream
+// (ver src/app/lib/scanConsoleStream.ts); no hay endpoint de demo — los
+// eventos los emite el backend real al procesar jobs vía POST /api/jobs.

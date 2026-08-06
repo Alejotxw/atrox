@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from atrox.api.audit import router as audit_router
 from atrox.api.auth import router as auth_router
+from atrox.api.chat import router as chat_router
 from atrox.api.console import router as console_router
 from atrox.api.credentials import router as credentials_router
 from atrox.api.discovery import router as discovery_router
@@ -26,10 +27,12 @@ from atrox.api.vulnscan import router as vulnscan_router
 from atrox.ai.schemas.rejections import build_rejection_logger
 from atrox.config import get_settings
 from atrox.console.bus import get_scan_log_bus
+from atrox.console.models import LogSeverity
 from atrox.findings.store import FalsePositiveStore
 from atrox.persistence.deps import build_persistence_service
 from atrox.queue.models import Job, JobType
 from atrox.queue.service import JobQueue
+from atrox.scanner.models import ScanStatus, VulnSeverity
 from atrox.scanner.nmap_wrapper import NmapWrapper
 from atrox.scanner.nuclei_wrapper import NucleiWrapper
 from atrox.security.audit_deps import build_audit_log_service
@@ -46,6 +49,27 @@ logger = logging.getLogger(__name__)
 _persistence = None
 
 
+# Estados en los que el wrapper nunca llegó a completar un escaneo real
+# (binario no encontrado, timeout, error inesperado) — deben fallar el job,
+# no devolver un resultado "exitoso" vacío indistinguible de "0 hallazgos".
+_TOOL_FAILURE_STATUSES = (ScanStatus.ERROR, ScanStatus.TIMEOUT)
+
+
+def _raise_if_tool_failed(result) -> None:
+    if result.status in _TOOL_FAILURE_STATUSES:
+        raise RuntimeError(result.error or f"El escaneo terminó en estado {result.status.value}")
+
+
+async def _emit_command(module: str, job_id, command_args: list[str]) -> None:
+    """Muestra el comando real de la herramienta en la consola antes de ejecutarlo."""
+    await get_scan_log_bus().emit(
+        module,
+        f"$ {' '.join(command_args)}",
+        severity=LogSeverity.INFO,
+        job_id=job_id,
+    )
+
+
 async def _dispatch_scan(job: Job) -> dict:
     """Dispatcher que selecciona el wrapper segun el tipo de escaneo."""
     settings = get_settings()
@@ -54,17 +78,32 @@ async def _dispatch_scan(job: Job) -> dict:
         wrapper = NmapWrapper(
             nmap_path=settings.nmap_path,
             timeout_seconds=settings.nmap_timeout_seconds,
+            on_command=lambda args: _emit_command("NMAP", job.id, args),
         )
         result = await wrapper.scan(
             target=job.params["target"],
             port_range=job.params.get("port_range", "1-1024"),
         )
+        _raise_if_tool_failed(result)
+
+        hosts_up = [host for host in result.hosts if host.status == "up"]
+        port_count = sum(len(host.ports) for host in hosts_up)
+        await get_scan_log_bus().emit(
+            "NMAP",
+            f"{len(hosts_up)} host(s) activo(s), {port_count} puerto(s) abiertos",
+            severity=LogSeverity.INFO,
+            job_id=job.id,
+        )
+
         return result.model_dump()
 
     # JobType.VULNSCAN
     wrapper_nuclei = NucleiWrapper(
         nuclei_path=settings.nuclei_path,
         timeout_seconds=settings.nuclei_timeout_seconds,
+        on_command=lambda args: _emit_command("NUCLEI", job.id, args),
+        docker_image=settings.nuclei_docker_image,
+        docker_templates_volume=settings.nuclei_docker_templates_volume,
     )
     severity_param = job.params.get("severity") or job.params.get("severities")
     if isinstance(severity_param, str):
@@ -78,6 +117,23 @@ async def _dispatch_scan(job: Job) -> dict:
         severities=severities,
         tags=job.params.get("tags"),
     )
+    _raise_if_tool_failed(result)
+
+    for finding in result.findings:
+        if finding.severity not in (VulnSeverity.CRITICAL, VulnSeverity.HIGH):
+            continue
+        log_severity = (
+            LogSeverity.CRITICAL
+            if finding.severity == VulnSeverity.CRITICAL
+            else LogSeverity.WARNING
+        )
+        await get_scan_log_bus().emit(
+            "NUCLEI",
+            f"[{finding.severity.value.upper()}] {finding.name} en {finding.host}",
+            severity=log_severity,
+            job_id=job.id,
+        )
+
     payload = result.model_dump()
 
     # Persistir hallazgos cifrados y dejar el result del job también cifrado
@@ -209,6 +265,7 @@ def create_app() -> FastAPI:
     application.include_router(scans_router)
     application.include_router(audit_router, dependencies=[Depends(require_mfa_admin)])
     application.include_router(vectors_router)
+    application.include_router(chat_router)
     application.include_router(payloads_router)
     application.include_router(scoring_router)
     application.include_router(validate_router)

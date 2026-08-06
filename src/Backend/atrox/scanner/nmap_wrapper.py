@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import subprocess
 import xml.etree.ElementTree as ET
 from collections.abc import Awaitable, Callable
 
@@ -80,6 +81,9 @@ def parse_nmap_xml(xml_output: str) -> list[HostFinding]:
     return hosts
 
 
+OnCommand = Callable[[list[str]], Awaitable[None]]
+
+
 class NmapWrapper:
     """Wrapper asíncrono de Nmap para descubrimiento de activos."""
 
@@ -88,10 +92,12 @@ class NmapWrapper:
         nmap_path: str = "nmap",
         timeout_seconds: int = 300,
         runner: NmapRunner | None = None,
+        on_command: OnCommand | None = None,
     ) -> None:
         self.nmap_path = nmap_path
         self.timeout_seconds = timeout_seconds
         self._runner = runner
+        self._on_command = on_command
 
     async def scan(self, target: str, port_range: str) -> DiscoveryScanResult:
         args = [
@@ -104,6 +110,9 @@ class NmapWrapper:
             f"{self.timeout_seconds}s",
             target,
         ]
+
+        if self._on_command is not None:
+            await self._on_command([self.nmap_path, *args])
 
         try:
             return_code, stdout, stderr = await self._execute(args)
@@ -129,7 +138,7 @@ class NmapWrapper:
                 target=target,
                 port_range=port_range,
                 status=ScanStatus.ERROR,
-                error=str(exc),
+                error=str(exc) or f"{type(exc).__name__} sin mensaje (ver logs del servidor)",
             )
 
         if not stdout.strip():
@@ -166,22 +175,32 @@ class NmapWrapper:
                 timeout=self.timeout_seconds,
             )
 
-        process = await asyncio.create_subprocess_exec(
-            self.nmap_path,
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._run_subprocess_blocking, args)
 
+    def _run_subprocess_blocking(self, args: list[str]) -> tuple[int, str, str]:
+        """Ejecuta Nmap de forma síncrona/bloqueante en un hilo del executor.
+
+        `asyncio.create_subprocess_exec` no funciona bajo `SelectorEventLoop`
+        (el loop que uvicorn usa en Windows cuando corre con `--reload` o
+        `--workers > 1`, ver `Config.use_subprocess` en uvicorn) — lanza
+        `NotImplementedError`. `subprocess.Popen` sí funciona en cualquier
+        tipo de event loop porque no depende de su soporte de subprocesos;
+        al correr en un hilo aparte, no bloquea el loop de asyncio.
+        """
+        process = subprocess.Popen(
+            [self.nmap_path, *args],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.timeout_seconds,
-            )
-        except asyncio.TimeoutError:
+            stdout_bytes, stderr_bytes = process.communicate(timeout=self.timeout_seconds)
+        except subprocess.TimeoutExpired:
             process.kill()
-            await process.wait()
-            raise
+            process.communicate()
+            raise TimeoutError(
+                f"El escaneo excedió el tiempo límite de {self.timeout_seconds}s"
+            ) from None
 
         return (
             process.returncode or 0,

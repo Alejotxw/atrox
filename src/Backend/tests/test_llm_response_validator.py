@@ -70,8 +70,8 @@ VALID_VECTORS = {
 # ── Registro de esquemas Pydantic (vectors, payloads, scores) ───────────────
 
 
-def test_registry_exposes_three_output_kinds() -> None:
-    assert SUPPORTED_KINDS == {"vectors", "payloads", "scores"}
+def test_registry_exposes_registered_output_kinds() -> None:
+    assert SUPPORTED_KINDS == {"vectors", "vector_narrative", "payloads", "scores", "chat"}
     assert get_output_model("scores") is ConfidenceScoreResult
     assert get_output_model("payloads") is PayloadGenerationResult
     assert get_output_model("vectors") is VectorAnalysisResult

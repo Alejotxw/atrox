@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from atrox.ai.agents.vectors.analyzer import VectorAnalysisAgent, MAX_BATCH_SIZE, SLA_MS
+from atrox.api.vectors import get_vector_agent
 from atrox.main import app
 from atrox.scanner.models import VulnFinding, VulnSeverity
 
@@ -141,16 +142,23 @@ def test_each_vector_has_justification(agent: VectorAnalysisAgent) -> None:
 
 
 def test_api_analyze_vectors() -> None:
+    """DoD del motor heurístico vía API — aislado del LLM real configurado en
+    el entorno local (.env puede tener ATROX_LLM_PROVIDER=ollama)."""
+    app.dependency_overrides[get_vector_agent] = lambda: VectorAnalysisAgent()
     client = TestClient(app)
     payload = {
         "findings": [f.model_dump(mode="json") for f in LAB_FINDINGS],
     }
 
-    response = client.post("/api/ai/vectors/analyze", json=payload)
+    try:
+        response = client.post("/api/ai/vectors/analyze", json=payload)
+    finally:
+        app.dependency_overrides.pop(get_vector_agent, None)
 
     assert response.status_code == 200
     body = response.json()
     assert body["total_findings"] == 4
+    assert body["source"] == "heuristic"
     assert body["within_sla"] is True
     assert len(body["vectors"]) >= 2
 

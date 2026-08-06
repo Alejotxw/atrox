@@ -307,3 +307,39 @@ export function markFalsePositive(
     }),
   });
 }
+
+// -- Tipos y función para Reporte Ejecutivo PDF (HU-023) -------------------------
+
+export async function downloadExecutiveReportPdf(scanId: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (activeSessionToken) {
+    headers['Authorization'] = `Bearer ${activeSessionToken}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/reports/executive/${scanId}`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body?.detail ?? body;
+    } catch {
+      // Ignorar no-json
+    }
+    throw new ApiError(response.status, detail);
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `reporte_ejecutivo_${scanId}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+

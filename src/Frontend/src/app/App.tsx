@@ -37,6 +37,7 @@ import {
   createScan,
   getScanDetail,
   analyzeVectors,
+  downloadExecutiveReportPdf,
   getHealth,
   getMeApi,
   logoutApi,
@@ -154,6 +155,8 @@ export default function App() {
   const [showInsights, setShowInsights] = useState(true);
   const [attackVectors, setAttackVectors] = useState<AttackVector[]>([]);
   const [backendHealth, setBackendHealth] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [lastScanId, setLastScanId] = useState<string | null>(null);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
   const auditRunIdRef = useRef(0);
@@ -279,6 +282,7 @@ export default function App() {
       // Paso 2: Vulnscan (Nuclei)
       const vulnScan = await createScan(target, 'vulnscan');
       if (!isCurrent()) return;
+      setLastScanId(String(vulnScan.scan_id));
       addLog('NUCLEI', 'text-emerald-400', `Escaneo de vulnerabilidades iniciado (scan_id: ${vulnScan.scan_id})`);
 
       const vulnDetail = await pollScanUntilDone(vulnScan.scan_id, isCurrent, { pageSize: 100 });
@@ -327,6 +331,21 @@ export default function App() {
       setMetrics(m => ({ ...m, report: "Error" }));
     } finally {
       if (isCurrent()) setIsAuditing(false);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!lastScanId) {
+      alert('Ejecute una auditoría o escaneo de seguridad antes de exportar el reporte ejecutivo en PDF.');
+      return;
+    }
+    setIsExportingPdf(true);
+    try {
+      await downloadExecutiveReportPdf(lastScanId);
+    } catch (err) {
+      alert(`Error al exportar reporte ejecutivo: ${describeError(err)}`);
+    } finally {
+      setIsExportingPdf(false);
     }
   };
 
@@ -451,6 +470,24 @@ export default function App() {
                 <>
                   <Play className="w-4 h-4 fill-current" />
                   Iniciar Auditoría Automatizada
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleExportPdf}
+              disabled={isExportingPdf || !lastScanId}
+              className="bg-gradient-to-r from-[#3182CE] to-[#2B6CB0] hover:from-[#2B6CB0] hover:to-[#2C5282] disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all shadow-md border border-blue-500/30"
+              title="Exportar reporte ejecutivo resumido en PDF para Directores de TI (HU-023)"
+            >
+              {isExportingPdf ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Generando PDF...
+                </>
+              ) : (
+                <>
+                  <FileText className="w-4 h-4" />
+                  Exportar PDF Ejecutivo
                 </>
               )}
             </button>

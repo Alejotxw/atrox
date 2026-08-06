@@ -4,9 +4,17 @@ from atrox.security.encryption import EncryptionService
 
 # Campos sensibles por categoría de entidad (reportes, credenciales, hallazgos).
 SENSITIVE_FIELDS: dict[str, frozenset[str]] = {
-    "finding": frozenset({"evidence", "poc", "raw_output", "description"}),
+    "finding": frozenset({"evidence", "poc", "raw_output", "description", "poc_evidence", "remediation_steps"}),
     "credential": frozenset({"password", "secret", "token", "private_key"}),
-    "report": frozenset({"content", "executive_summary", "business_impact_narrative", "technical_details", "body"}),
+    "report": frozenset({
+        "content",
+        "executive_summary",
+        "business_impact_narrative",
+        "technical_details",
+        "body",
+        "poc_evidence",
+        "remediation_steps",
+    }),
 }
 
 

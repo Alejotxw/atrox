@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Marcado manual de falsos positivos (HU-022)
     false_positive_store_path: str = "data/false_positives.jsonl"
 
+    # Validación estructurada de respuestas IA (HU-017 / ADR-002)
+    llm_validation_max_retries: int = 1
+    llm_rejection_log_path: str | None = None
+
     # Abstracción de proveedores LLM (HU-012 / ADR-005)
     # "gemini" (Cloud) | "ollama" (local) | "mock" (default: tests/desarrollo)
     llm_provider: str = "mock"

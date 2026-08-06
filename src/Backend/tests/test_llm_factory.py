@@ -35,7 +35,7 @@ class TestBuildSingleProvider:
         assert provider.model == "qwen2"
 
     def test_unknown_raises_value_error(self) -> None:
-        with pytest.raises(ValueError, match="Desconocido"):
+        with pytest.raises(ValueError, match="(?i)desconocido"):
             build_single_provider("unknown", make_settings())
 
 
@@ -73,7 +73,7 @@ class TestBuildLLMProvider:
         assert isinstance(provider, MockLLMProvider)
 
     def test_unknown_raises_value_error(self) -> None:
-        with pytest.raises(ValueError, match="Desconocido"):
+        with pytest.raises(ValueError, match="(?i)desconocido"):
             build_llm_provider(make_settings(llm_provider="unknown"))
 
     def test_ollama_primary_single_when_no_fallback(self) -> None:

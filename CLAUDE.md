@@ -67,7 +67,9 @@ No frontend test runner is configured.
 
 **Audit log (ADR-003):** `atrox/security/audit_signer.py` + `audit_service.py` implement an append-only log signed with HMAC-SHA256 (key from `ATROX_AUDIT_SIGNING_KEY`), queryable via `GET /api/audit/logs` and integrity-checked via `GET /api/audit/integrity`. Every `POST /api/jobs` submission is auto-logged as `scan.submitted`. Audit logging is entirely disabled (`app.state.audit_log = None`) when the signing key isn't configured — see `atrox/main.py::lifespan`.
 
-**API routers (`atrox/api/`):** each module owns one router mounted in `atrox/main.py::create_app` — `health`, `discovery` (Nmap), `vulnscan` (Nuclei), `jobs` (queue submission/status), `audit`, `vectors` (AI attack-vector analysis).
+**Threat intelligence (HU-005/RF-010, `atrox/threat_intel/`):** a daily NVD sync keeps the CVE catalog indexed for finding correlation. `nvd_client.py` is an async `httpx` client against the NVD CVE 2.0 API (delta via `lastModStartDate` from the last successful sync, injectable `http_client` for tests); `cve_store.py` persists the catalog as JSONL (`data/threat_intel/cves.jsonl`, same pattern as the audit log) plus a queryable last-sync status JSON; `service.py::NvdSyncService` orchestrates the sync, swallows network errors into `last_error` (never interrupting the scan queue), and `run_daily()` is the scheduler started in the app lifespan — it sleeps first, so startup makes no network calls. Manual runs: `POST /api/threats/sync`, `python -m atrox.threat_intel`, or the `atrox-nvd-sync` console script. Catalog/status endpoints: `GET /api/threats/cves`, `GET /api/threats/cves/{id}`, `GET /api/threats/last-sync`.
+
+**API routers (`atrox/api/`):** each module owns one router mounted in `atrox/main.py::create_app` — `health`, `discovery` (Nmap), `vulnscan` (Nuclei), `jobs` (queue submission/status), `audit`, `threats` (NVD catalog/sync), `vectors` (AI attack-vector analysis).
 
 ## Conventions
 

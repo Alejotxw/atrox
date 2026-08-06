@@ -49,6 +49,40 @@ class Settings(BaseSettings):
     # Marcado manual de falsos positivos (HU-022)
     false_positive_store_path: str = "data/false_positives.jsonl"
 
+    # Validación estructurada de respuestas IA (HU-017 / ADR-002)
+    llm_validation_max_retries: int = 1
+    llm_rejection_log_path: str | None = None
+
+    # Abstracción de proveedores LLM (HU-012 / ADR-005)
+    # "gemini" (Cloud) | "ollama" (local) | "mock" (default: tests/desarrollo)
+    llm_provider: str = "mock"
+    llm_model: str | None = None
+    llm_api_key: str | None = None
+    llm_timeout_seconds: int = 30
+    llm_gemini_model: str = "gemini-2.0-flash"
+    llm_ollama_base_url: str = "http://localhost:11434"
+    llm_ollama_model: str = "llama3"
+    llm_fallback_providers: list[str] = []
+
+    # Sincronización diaria de base de amenazas NVD (HU-005 / RF-010)
+    nvd_api_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    nvd_api_key: str | None = None
+    nvd_request_timeout_seconds: int = 30
+    nvd_sync_interval_hours: int = 24
+    nvd_sync_enabled: bool = True
+    nvd_sync_on_startup: bool = False
+    nvd_store_path: str = "data/threat_intel/cves.jsonl"
+    nvd_sync_status_path: str = "data/threat_intel/last_sync.json"
+
+    # Autenticación MFA para panel de administración (HU-018 / RNF-002)
+    admin_username: str = "sysadmin"
+    admin_password: str = "AtroxAdmin2026!"
+    totp_secret: str | None = None
+    session_ttl_minutes: int = 60
+    mfa_max_failed_attempts: int = 5
+    mfa_lockout_minutes: int = 15
+    mfa_required: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

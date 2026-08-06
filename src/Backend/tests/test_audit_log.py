@@ -26,7 +26,9 @@ def audit_service(tmp_path: Path, signing_key_b64: str) -> AuditLogService:
 @pytest.fixture
 def client_with_audit(audit_service: AuditLogService) -> TestClient:
     app.state.audit_log = audit_service
-    yield TestClient(app)
+    c = TestClient(app)
+    c.headers["Authorization"] = "Bearer test-audit-token"
+    yield c
     app.state.audit_log = None
 
 
@@ -174,7 +176,7 @@ def test_audit_api_unavailable_without_config() -> None:
     app.state.audit_log = None
     client = TestClient(app)
 
-    response = client.get("/api/audit/logs")
+    response = client.get("/api/audit/logs", headers={"Authorization": "Bearer test-audit-token"})
     assert response.status_code == 503
 
     app.state.audit_log = None

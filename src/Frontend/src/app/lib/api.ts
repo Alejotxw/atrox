@@ -21,10 +21,40 @@ export class ApiError extends Error {
   }
 }
 
+export function describeError(err: unknown): string {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+let activeSessionToken: string | null = sessionStorage.getItem('atrox_session_token');
+
+export function setAuthToken(token: string | null): void {
+  activeSessionToken = token;
+  if (token) {
+    sessionStorage.setItem('atrox_session_token', token);
+  } else {
+    sessionStorage.removeItem('atrox_session_token');
+  }
+}
+
+export function getAuthToken(): string | null {
+  return activeSessionToken;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(init?.headers as Record<string, string> ?? {}),
+  };
+
+  if (activeSessionToken && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${activeSessionToken}`;
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers,
   });
 
   if (!response.ok) {
@@ -39,6 +69,63 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+// -- Tipos que reflejan atrox/api/auth.py (HU-018) ------------------------------
+
+export interface LoginStep1Response {
+  mfa_required: boolean;
+  mfa_token: string;
+  message: string;
+}
+
+export interface MfaVerifyResponse {
+  session_token: string;
+  expires_in_minutes: number;
+  user: {
+    username: string;
+    role: string;
+  };
+}
+
+export interface MfaSetupResponse {
+  username: string;
+  secret: string;
+  otpauth_url: string;
+}
+
+export interface UserStatusResponse {
+  username: string;
+  expires_at: number;
+  seconds_remaining: number;
+}
+
+export function loginApi(username: string, password: string): Promise<LoginStep1Response> {
+  return request<LoginStep1Response>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function verifyMfaApi(mfaToken: string, code: string): Promise<MfaVerifyResponse> {
+  return request<MfaVerifyResponse>('/api/auth/mfa/verify', {
+    method: 'POST',
+    body: JSON.stringify({ mfa_token: mfaToken, code }),
+  });
+}
+
+export function getMfaSetupApi(): Promise<MfaSetupResponse> {
+  return request<MfaSetupResponse>('/api/auth/mfa/setup');
+}
+
+export function getMeApi(): Promise<UserStatusResponse> {
+  return request<UserStatusResponse>('/api/auth/me');
+}
+
+export function logoutApi(): Promise<{ message: string }> {
+  return request<{ message: string }>('/api/auth/logout', {
+    method: 'POST',
+  });
 }
 
 // -- Tipos que reflejan atrox/scanner/models.py --------------------------------
@@ -60,7 +147,26 @@ export interface VulnFinding {
   timestamp: string;
 }
 
-// -- Tipos que reflejan atrox/api/scans.py (HU-010) -----------------------------
+// -- Tipos que reflejan atrox/api/scans.py (HU-009/HU-010) ----------------------
+
+export type ScanType = 'discovery' | 'vulnscan';
+
+export interface ScanCreateResponse {
+  scan_id: string;
+  status: string;
+}
+
+export function createScan(
+  target: string,
+  scanType: ScanType,
+  params: object = {},
+): Promise<ScanCreateResponse> {
+  return request<ScanCreateResponse>('/api/scans', {
+    method: 'POST',
+    body: JSON.stringify({ target, scan_type: scanType, params }),
+  });
+}
+
 
 export interface PaginatedFindings {
   items: VulnFinding[];
@@ -174,6 +280,18 @@ export interface FalsePositiveMarkResponse {
   marked_at: string;
 }
 
+// -- Tipos que reflejan atrox/api/health.py --------------------------------------
+
+export interface HealthResponse {
+  status: string;
+  service: string;
+  environment: string;
+}
+
+export function getHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>('/health');
+}
+
 export function markFalsePositive(
   scanId: string,
   finding: VulnFinding,
@@ -188,6 +306,79 @@ export function markFalsePositive(
       reason: options.reason,
     }),
   });
+}
+
+// -- Tipos y función para Reporte Ejecutivo PDF (HU-023) -------------------------
+
+export async function downloadExecutiveReportPdf(scanId: string): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (activeSessionToken) {
+    headers['Authorization'] = `Bearer ${activeSessionToken}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/reports/executive/${scanId}`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body?.detail ?? body;
+    } catch {
+      // Ignorar no-json
+    }
+    throw new ApiError(response.status, detail);
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `reporte_ejecutivo_${scanId}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+// -- Función para Reporte Técnico (PDF/HTML) (HU-024) -----------------------------
+
+export async function downloadTechnicalReport(
+  scanId: string,
+  format: 'pdf' | 'html' = 'pdf',
+): Promise<void> {
+  const headers: Record<string, string> = {};
+  if (activeSessionToken) {
+    headers['Authorization'] = `Bearer ${activeSessionToken}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/reports/technical/${scanId}?format=${format}`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body?.detail ?? body;
+    } catch {
+      // Ignorar no-json
+    }
+    throw new ApiError(response.status, detail);
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `reporte_tecnico_${scanId}.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
 }
 
 // -- Tipos que reflejan atrox/queue/models.py (HU-004 / listado para HU-019) ---

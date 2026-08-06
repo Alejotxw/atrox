@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ShieldAlert, 
   Database, 
@@ -25,15 +25,103 @@ import {
   Zap,
   Target,
   Terminal,
-  ListFilter
+  ListFilter,
+  LogOut,
+  QrCode,
+  UserCheck
 } from 'lucide-react';
 import FindingsManagementView from './components/findings/FindingsManagementView';
+import LoginForm from './components/auth/LoginForm';
 import ScanConsole from './components/ScanConsole/ScanConsole';
 import DashboardMetricsPanel from './pages/Dashboard';
+import {
+  createScan,
+  getScanDetail,
+  analyzeVectors,
+  downloadExecutiveReportPdf,
+  downloadTechnicalReport,
+  getHealth,
+  getMeApi,
+  logoutApi,
+  setAuthToken,
+  getAuthToken,
+  ApiError,
+  type AttackVector,
+  type ScanDetailResponse,
+  type GetScanDetailParams,
+  type VulnSeverity,
+} from './lib/api';
 
-// --- Datos Iniciales Simulados para la vista inicial ---
-const INITIAL_METRICS = { subdomains: "42", ports: "8", vulns: "3", report: "Generando" };
-const INITIAL_FINDINGS = [
+// --- Tipos locales de la vista de hallazgos ---
+type Severity = 'Crítico' | 'Alto' | 'Medio' | 'Bajo' | 'Info' | 'Desconocido';
+type FindingStatus = 'checked' | 'unchecked' | 'na';
+interface FindingRow {
+  id: string;
+  name: string;
+  vector: string;
+  severity: Severity;
+  status: FindingStatus;
+}
+
+const SEVERITY_LABELS: Record<VulnSeverity, Severity> = {
+  critical: 'Crítico',
+  high: 'Alto',
+  medium: 'Medio',
+  low: 'Bajo',
+  info: 'Info',
+  unknown: 'Desconocido',
+};
+
+const mapSeverity = (sev: VulnSeverity): Severity => SEVERITY_LABELS[sev] ?? 'Desconocido';
+
+const describeError = (err: unknown): string => {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error) return err.message;
+  return String(err);
+};
+
+// --- El backend solo acepta IP o FQDN puros (sin esquema/ruta/puerto) ---
+const normalizeTarget = (raw: string): string => {
+  let value = raw.trim();
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value)) {
+    try {
+      value = new URL(value).hostname;
+    } catch {
+      value = value.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '').split(/[/?#]/)[0];
+    }
+  } else {
+    value = value.split(/[/?#]/)[0];
+  }
+  return value.split(':')[0];
+};
+
+// --- Sondeo de un scan hasta que quede 'done' o 'failed' ---
+async function pollScanUntilDone(
+  scanId: string,
+  isCurrent: () => boolean,
+  params?: GetScanDetailParams,
+): Promise<ScanDetailResponse | null> {
+  while (isCurrent()) {
+    const detail = await getScanDetail(scanId, params);
+    if (!isCurrent()) return null;
+    if (detail.status === 'done' || detail.status === 'failed') return detail;
+    await new Promise((res) => setTimeout(res, 1500));
+  }
+  return null;
+}
+
+function describeThreatLevel(vectors: AttackVector[]): { label: string; className: string } | null {
+  if (vectors.length === 0) return null;
+  const maxScore = Math.max(...vectors.map((v) => v.severity_score));
+  if (maxScore >= 8) return { label: 'CRÍTICO', className: 'text-red-500' };
+  if (maxScore >= 5) return { label: 'ALTO', className: 'text-orange-400' };
+  if (maxScore >= 3) return { label: 'MEDIO', className: 'text-[#D4AF37]' };
+  return { label: 'BAJO', className: 'text-blue-400' };
+}
+
+// --- Datos Iniciales Simulados para la vista inicial (placeholder previo al primer escaneo real) ---
+const INITIAL_METRICS = { hosts: "42", ports: "8", vulns: "3", report: "Generando" };
+const INITIAL_FINDINGS: FindingRow[] = [
   { id: 'VULN-001', name: 'SQL Injection (Blind)', vector: 'HTTP POST /login.php', severity: 'Crítico', status: 'checked' },
   { id: 'VULN-002', name: 'Apache Path Traversal (CVE-2021-41773)', vector: 'GET /cgi-bin/', severity: 'Crítico', status: 'checked' },
   { id: 'VULN-003', name: 'Default DB Credentials', vector: 'MySQL Port 3306', severity: 'Medio', status: 'unchecked' },
@@ -42,67 +130,213 @@ const INITIAL_FINDINGS = [
 
 export default function App() {
   // --- ESTADOS INTERACTIVOS ---
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!getAuthToken());
+  const [authenticatedUser, setAuthenticatedUser] = useState<string>('sysadmin');
+  const [sessionRemaining, setSessionRemaining] = useState<number | null>(null);
+
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [targetUrl, setTargetUrl] = useState('corp.internal.uide.edu.ec');
   const [isAuditing, setIsAuditing] = useState(false);
   
   const [metrics, setMetrics] = useState(INITIAL_METRICS);
-  const [findings, setFindings] = useState(INITIAL_FINDINGS);
+  const [findings, setFindings] = useState<FindingRow[]>(INITIAL_FINDINGS);
   const [showInsights, setShowInsights] = useState(true);
+  const [attackVectors, setAttackVectors] = useState<AttackVector[]>([]);
+  const [backendHealth, setBackendHealth] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [lastScanId, setLastScanId] = useState<string | null>(null);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [auditToken, setAuditToken] = useState(0);
 
-  // --- UTILIDAD PARA SIMULAR RETRASOS ---
-  const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+  const auditRunIdRef = useRef(0);
 
-  // --- MOTOR DE SIMULACIÓN DE AUDITORÍA (métricas/hallazgos UI; logs vía SSE HU-020) ---
+  // --- VERIFICACIÓN DE SESIÓN MFA ACTIVA ---
+  useEffect(() => {
+    if (!getAuthToken()) {
+      setIsAuthenticated(false);
+      return;
+    }
+
+    const checkSession = async () => {
+      try {
+        const res = await getMeApi();
+        setAuthenticatedUser(res.username);
+        setSessionRemaining(res.seconds_remaining);
+        setIsAuthenticated(true);
+      } catch {
+        setAuthToken(null);
+        setIsAuthenticated(false);
+      }
+    };
+    checkSession();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await logoutApi();
+    } catch {
+      // Ignorar si falla la revocación en backend
+    } finally {
+      setAuthToken(null);
+      setIsAuthenticated(false);
+    }
+  };
+
+  // --- VERIFICACIÓN PERIÓDICA DE SALUD DEL BACKEND ---
+  useEffect(() => {
+    let cancelled = false;
+    const checkHealth = async () => {
+      try {
+        await getHealth();
+        if (!cancelled) setBackendHealth('online');
+      } catch {
+        if (!cancelled) setBackendHealth('offline');
+      }
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // --- INVALIDA CUALQUIER SONDEO EN CURSO AL DESMONTAR EL COMPONENTE ---
+  useEffect(() => {
+    return () => {
+      auditRunIdRef.current += 1;
+    };
+  }, []);
+
+  // --- MOTOR REAL DE AUDITORÍA (discovery -> vulnscan -> análisis de vectores; consola en vivo vía SSE HU-020) ---
   const handleStartAudit = async () => {
     if (isAuditing || !targetUrl.trim()) return;
-    
+
+    auditRunIdRef.current += 1;
+    const runId = auditRunIdRef.current;
+    const isCurrent = () => auditRunIdRef.current === runId;
+
+    const target = normalizeTarget(targetUrl);
+
     setIsAuditing(true);
     setAuditToken((n) => n + 1);
     setFindings([]);
+    setAttackVectors([]);
     setShowInsights(false);
-    setMetrics({ subdomains: "0", ports: "0", vulns: "0", report: "Iniciando" });
+    setMetrics({ hosts: "0", ports: "0", vulns: "0", report: "Iniciando" });
 
-    // Paso 1–2: NMAP (métricas locales; la consola llega por SSE)
-    await delay(1200);
-    setMetrics(m => ({ ...m, ports: "Scanning..." }));
-    
-    await delay(2500);
-    setMetrics(m => ({ ...m, ports: "3" }));
+    try {
+      if (!target) {
+        alert('Objetivo inválido tras normalizar — verifica que sea una IP o dominio.');
+        setMetrics(m => ({ ...m, report: "Error" }));
+        setIsAuditing(false);
+        return;
+      }
 
-    // Paso 3: Subfinder
-    await delay(1200);
-    setMetrics(m => ({ ...m, subdomains: "Buscando..." }));
-    
-    await delay(1800);
-    setMetrics(m => ({ ...m, subdomains: "42" }));
-    
-    // Paso 4: Nuclei (Vulnerabilidades)
-    await delay(2800);
-    setFindings(prev => [...prev, { id: 'VULN-001', name: 'SQL Injection (Blind)', vector: 'HTTP POST /login.php', severity: 'Crítico', status: 'unchecked' }]);
-    setMetrics(m => ({ ...m, vulns: "1" }));
-    
-    await delay(1200);
-    setFindings(prev => [...prev, { id: 'VULN-002', name: 'Apache Path Traversal (CVE-2021-41773)', vector: 'GET /cgi-bin/', severity: 'Crítico', status: 'unchecked' }]);
-    setMetrics(m => ({ ...m, vulns: "2" }));
+      // Paso 1: Discovery (Nmap)
+      const discoveryScan = await createScan(target, 'discovery');
+      if (!isCurrent()) return;
 
-    await delay(1500);
-    setFindings(prev => [...prev, { id: 'VULN-003', name: 'Default DB Credentials', vector: 'MySQL Port 3306', severity: 'Medio', status: 'unchecked' }]);
-    setFindings(prev => [...prev, { id: 'VULN-004', name: 'Open Directory Listing', vector: 'GET /assets/uploads/', severity: 'Info', status: 'na' }]);
-    setMetrics(m => ({ ...m, vulns: "3", report: "Analizando" }));
+      const discoveryDetail = await pollScanUntilDone(discoveryScan.scan_id, isCurrent);
+      if (!isCurrent() || !discoveryDetail) return;
 
-    // Paso 5: Ollama Insights
-    await delay(3500);
-    setShowInsights(true);
-    setMetrics(m => ({ ...m, report: "Completado" }));
-    setIsAuditing(false);
+      if (discoveryDetail.status === 'failed') {
+        alert(`Descubrimiento fallido: ${discoveryDetail.error ?? 'error desconocido'}`);
+        setMetrics(m => ({ ...m, report: "Error" }));
+        return;
+      }
+
+      const hosts = discoveryDetail.assets;
+      const totalPorts = hosts.reduce((acc, h) => acc + h.ports.length, 0);
+      setMetrics(m => ({ ...m, hosts: String(hosts.length), ports: String(totalPorts) }));
+
+      // Paso 2: Vulnscan (Nuclei)
+      const vulnScan = await createScan(target, 'vulnscan');
+      if (!isCurrent()) return;
+      setLastScanId(String(vulnScan.scan_id));
+
+      const vulnDetail = await pollScanUntilDone(vulnScan.scan_id, isCurrent, { pageSize: 100 });
+      if (!isCurrent() || !vulnDetail) return;
+
+      if (vulnDetail.status === 'failed') {
+        alert(`Escaneo de vulnerabilidades fallido: ${vulnDetail.error ?? 'error desconocido'}`);
+        setMetrics(m => ({ ...m, report: "Error" }));
+        return;
+      }
+
+      const items = vulnDetail.findings.items;
+      setFindings(items.map(f => ({
+        id: f.template_id,
+        name: f.name,
+        vector: f.matched_at || f.host,
+        severity: mapSeverity(f.severity),
+        status: 'unchecked' as const,
+      })));
+      setMetrics(m => ({ ...m, vulns: String(vulnDetail.findings.total) }));
+
+      // Paso 3: Correlación de vectores de ataque (motor heurístico)
+      if (items.length > 0) {
+        try {
+          const analysis = await analyzeVectors(items);
+          if (!isCurrent()) return;
+          setAttackVectors(analysis.vectors);
+        } catch {
+          if (!isCurrent()) return;
+          setAttackVectors([]);
+        }
+      } else {
+        setAttackVectors([]);
+      }
+
+      if (!isCurrent()) return;
+      setShowInsights(true);
+      setMetrics(m => ({ ...m, report: "Completado" }));
+    } catch (err) {
+      if (!isCurrent()) return;
+      alert(`Error durante la auditoría: ${describeError(err)}`);
+      setMetrics(m => ({ ...m, report: "Error" }));
+    } finally {
+      if (isCurrent()) setIsAuditing(false);
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!lastScanId) {
+      alert('Ejecute una auditoría o escaneo de seguridad antes de exportar el reporte ejecutivo en PDF.');
+      return;
+    }
+    setIsExportingPdf(true);
+    try {
+      await downloadExecutiveReportPdf(lastScanId);
+    } catch (err) {
+      alert(`Error al exportar reporte ejecutivo: ${describeError(err)}`);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
+  const handleExportTechnical = async (format: 'pdf' | 'html') => {
+    if (!lastScanId) {
+      alert('Ejecute una auditoría o escaneo de seguridad antes de exportar el reporte técnico.');
+      return;
+    }
+    setIsExportingPdf(true);
+    try {
+      await downloadTechnicalReport(lastScanId, format);
+    } catch (err) {
+      alert(`Error al exportar reporte técnico (${format.toUpperCase()}): ${describeError(err)}`);
+    } finally {
+      setIsExportingPdf(false);
+    }
   };
 
   // --- VALIDAR VULNERABILIDAD MANUALMENTE EN TABLA ---
   const handleValidateFinding = (id: string) => {
     setFindings(prev => prev.map(f => f.id === id && f.status === 'unchecked' ? { ...f, status: 'checked' } : f));
   };
+
+  if (!isAuthenticated) {
+    return <LoginForm onSuccess={(user) => { setAuthenticatedUser(user); setIsAuthenticated(true); }} />;
+  }
 
   return (
     <div className="flex h-screen w-full bg-[#0F172A] text-slate-300 font-sans overflow-hidden">
@@ -136,14 +370,26 @@ export default function App() {
         </div>
 
         <div className="p-5 border-t border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
-              <span className="text-xs font-bold text-white">AD</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#7A1C3E]/20 flex items-center justify-center border border-[#7A1C3E]/40 text-[#D4AF37]">
+                <UserCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-white tracking-wide">{authenticatedUser}</p>
+                <p className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  MFA Activo (Root)
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-medium text-white">Admin SecOps</p>
-              <p className="text-xs text-slate-500">Nivel de Acceso: Root</p>
-            </div>
+            <button
+              onClick={handleLogout}
+              title="Cerrar Sesión MFA"
+              className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all border border-transparent hover:border-red-500/20"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </aside>
@@ -154,13 +400,25 @@ export default function App() {
         {/* 2. Header Superior - Status del Sistema */}
         <header className="h-20 bg-[#1E293B]/80 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-8 shrink-0">
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2.5 bg-[#0B1121] px-4 py-2 rounded-full border border-green-500/30 shadow-inner">
-              <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
-              <span className="text-xs text-green-400 font-semibold tracking-wide">Ollama Local Engine: ONLINE (Llama 3)</span>
+            <div className={`flex items-center gap-2.5 bg-[#0B1121] px-4 py-2 rounded-full border shadow-inner ${
+              backendHealth === 'online' ? 'border-green-500/30' : backendHealth === 'offline' ? 'border-red-500/30' : 'border-slate-700'
+            }`}>
+              <div className={`w-2.5 h-2.5 rounded-full ${
+                backendHealth === 'online'
+                  ? 'bg-green-500 animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]'
+                  : backendHealth === 'offline'
+                  ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]'
+                  : 'bg-slate-500 animate-pulse'
+              }`}></div>
+              <span className={`text-xs font-semibold tracking-wide ${
+                backendHealth === 'online' ? 'text-green-400' : backendHealth === 'offline' ? 'text-red-400' : 'text-slate-400'
+              }`}>
+                Backend Atrox: {backendHealth === 'online' ? 'ONLINE' : backendHealth === 'offline' ? 'DESCONECTADO' : 'Verificando...'}
+              </span>
             </div>
             <div className="flex items-center gap-2.5 bg-[#0B1121] px-4 py-2 rounded-full border border-slate-700 shadow-inner">
               <Database className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-xs text-slate-300 font-semibold tracking-wide">Base de Datos SQLite: CONECTADA</span>
+              <span className="text-xs text-slate-300 font-semibold tracking-wide">Motor de Correlación de Vectores (heurístico) · Almacenamiento JSONL</span>
             </div>
           </div>
           
@@ -195,6 +453,37 @@ export default function App() {
                 </>
               )}
             </button>
+            <button
+              onClick={handleExportPdf}
+              disabled={isExportingPdf || !lastScanId}
+              className="bg-gradient-to-r from-[#3182CE] to-[#2B6CB0] hover:from-[#2B6CB0] hover:to-[#2C5282] disabled:opacity-50 disabled:cursor-not-allowed text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md border border-blue-500/30"
+              title="Exportar reporte ejecutivo resumido en PDF para Directores de TI (HU-023)"
+            >
+              {isExportingPdf ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FileText className="w-3.5 h-3.5" />
+              )}
+              Reporte Ejecutivo PDF
+            </button>
+            <button
+              onClick={() => handleExportTechnical('pdf')}
+              disabled={isExportingPdf || !lastScanId}
+              className="bg-gradient-to-r from-[#2D3748] to-[#1A202C] hover:from-[#1A202C] hover:to-[#0F172A] disabled:opacity-50 disabled:cursor-not-allowed text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md border border-slate-600/40"
+              title="Exportar reporte técnico detallado en PDF con PoC y comandos de remediación para SysAdmins (HU-024)"
+            >
+              <Terminal className="w-3.5 h-3.5 text-purple-400" />
+              Reporte Técnico PDF
+            </button>
+            <button
+              onClick={() => handleExportTechnical('html')}
+              disabled={isExportingPdf || !lastScanId}
+              className="bg-gradient-to-r from-[#0D9488] to-[#0F766E] hover:from-[#0F766E] hover:to-[#115E59] disabled:opacity-50 disabled:cursor-not-allowed text-white px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md border border-teal-500/30"
+              title="Exportar reporte técnico interactivo en HTML con PoC y comandos para SysAdmins (HU-024)"
+            >
+              <Zap className="w-3.5 h-3.5 text-teal-300" />
+              Reporte Técnico HTML
+            </button>
           </div>
         </header>
 
@@ -205,8 +494,40 @@ export default function App() {
             {/* MAIN CONTENT VIEWS */}
             {activeTab === 'Dashboard' && (
               <>
-                {/* HU-019 — KPIs reales desde HU-010 (polling sin recarga) */}
+                {/* HU-019 — KPIs globales reales desde HU-010 (polling sin recarga) */}
                 <DashboardMetricsPanel />
+
+                {/* 3. Panel de Progreso de la Auditoría en Curso */}
+                <div className="grid grid-cols-4 gap-6 animate-in fade-in duration-300">
+                  <MetricCard
+                    title="Hosts Descubiertos"
+                    value={metrics.hosts}
+                    module="Módulo Nmap (Discovery)"
+                    icon={<Network />}
+                    color="blue"
+                  />
+                  <MetricCard
+                    title="Puertos y Servicios"
+                    value={metrics.ports}
+                    module="Módulo Nmap"
+                    icon={<Server />}
+                    color="indigo"
+                  />
+                  <MetricCard
+                    title="Vulnerabilidades Críticas"
+                    value={metrics.vulns}
+                    module="Módulo Nuclei"
+                    icon={<AlertTriangle />}
+                    color="red"
+                  />
+                  <MetricCard
+                    title="Estado del Reporte"
+                    value={metrics.report}
+                    module="Módulo ReportLab"
+                    icon={<FileText />}
+                    color="gold"
+                  />
+                </div>
 
                 {/* 4. Área Central - El Núcleo del Proyecto */}
                 <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-both">
@@ -240,41 +561,45 @@ export default function App() {
                         </div>
                       ) : (
                         <div className="animate-in fade-in slide-in-from-right-4 duration-700">
-                          <h4 className="text-[15px] font-semibold text-white mb-4">Análisis Crítico de Riesgos</h4>
-                          
-                          <div className="mb-6 flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-lg p-4 shadow-inner">
-                            <span className="text-xs text-slate-300 uppercase tracking-widest font-bold">Nivel de Amenaza Estimado</span>
-                            <div className="flex items-center gap-2 text-red-500 font-black text-sm tracking-wide">
-                              <AlertTriangle className="w-4 h-4 animate-bounce" />
-                              CRÍTICO
+                          <h4 className="text-[15px] font-semibold text-white mb-4">Vectores de Ataque Correlacionados</h4>
+
+                          {attackVectors.length === 0 ? (
+                            <div className="flex items-start gap-3 bg-slate-800/40 border border-slate-700/50 rounded-lg p-4">
+                              <Info className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                              <p className="text-[13px] text-slate-400 leading-relaxed">No se correlacionaron vectores de ataque a partir de los hallazgos de este escaneo.</p>
                             </div>
-                          </div>
-                          
-                          <div className="space-y-5">
-                            <div className="relative">
-                              <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#D4AF37] rounded-l"></div>
-                              <p className="text-[13px] text-slate-300 font-mono leading-relaxed bg-black/40 pl-5 pr-4 py-3 rounded border border-slate-700/50">
-                                Se han detectado múltiples vectores de compromiso directo. La combinación de inyección SQL en <span className="text-red-300">/login.php</span> y vulnerabilidades de Path Traversal permite la ejecución remota de código (RCE).
-                              </p>
-                            </div>
-                            
-                            <div>
-                              <h5 className="text-xs font-bold text-[#D4AF37] uppercase tracking-widest mb-3 flex items-center gap-2">
-                                <ShieldCheck className="w-4 h-4" />
-                                Recomendaciones (Mitigación)
-                              </h5>
-                              <ul className="space-y-3">
-                                <li className="flex gap-3 text-[13px] bg-black/30 p-3.5 rounded-lg border border-slate-700/50 hover:border-slate-600 transition-colors">
-                                  <span className="text-[#D4AF37] font-black font-mono">1.</span>
-                                  <span className="text-slate-300 leading-relaxed">Actualizar servidor Apache (parchear <strong>CVE-2021-41773</strong>).</span>
-                                </li>
-                                <li className="flex gap-3 text-[13px] bg-black/30 p-3.5 rounded-lg border border-slate-700/50 hover:border-slate-600 transition-colors">
-                                  <span className="text-[#D4AF37] font-black font-mono">2.</span>
-                                  <span className="text-slate-300 leading-relaxed">Consultas parametrizadas en <code className="bg-black text-red-400 px-1.5 py-0.5 rounded font-mono text-xs border border-red-500/20">/login.php</code>.</span>
-                                </li>
-                              </ul>
-                            </div>
-                          </div>
+                          ) : (
+                            <>
+                              {(() => {
+                                const threat = describeThreatLevel(attackVectors);
+                                return threat ? (
+                                  <div className="mb-6 flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-lg p-4 shadow-inner">
+                                    <span className="text-xs text-slate-300 uppercase tracking-widest font-bold">Nivel de Amenaza Estimado</span>
+                                    <div className={`flex items-center gap-2 font-black text-sm tracking-wide ${threat.className}`}>
+                                      <AlertTriangle className="w-4 h-4" />
+                                      {threat.label}
+                                    </div>
+                                  </div>
+                                ) : null;
+                              })()}
+
+                              <div className="space-y-4">
+                                {attackVectors.map((vector) => (
+                                  <div key={vector.vector_id} className="relative">
+                                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#D4AF37] rounded-l"></div>
+                                    <div className="bg-black/40 pl-5 pr-4 py-3 rounded border border-slate-700/50">
+                                      <div className="flex items-center justify-between mb-2 gap-2">
+                                        <span className="text-[13px] font-semibold text-white">{vector.name}</span>
+                                        <span className="text-[11px] font-bold text-[#D4AF37] shrink-0">Score {vector.severity_score}</span>
+                                      </div>
+                                      <p className="text-[13px] text-slate-300 leading-relaxed mb-2">{vector.justification}</p>
+                                      <p className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Impacto estimado: {vector.estimated_impact}</p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
@@ -363,12 +688,41 @@ const NavItem = ({ icon, label, active, badge, onClick }: { icon: React.ReactEle
   </button>
 );
 
-const TableRow = ({ id, name, vector, severity, status, onValidate }: { id: string, name: string, vector: string, severity: string, status: string, onValidate?: () => void }) => {
-  const getSeverityBadge = (sev: string) => {
+const MetricCard = ({ title, value, module, icon, color }: { title: string, value: string, module: string, icon: React.ReactElement, color: string }) => {
+  const colorMap: Record<string, string> = {
+    blue: 'text-blue-400 bg-blue-500/10 border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.05)]',
+    indigo: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.05)]',
+    red: 'text-red-400 bg-red-500/10 border-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.05)]',
+    gold: 'text-[#D4AF37] bg-[#D4AF37]/10 border-[#D4AF37]/20 shadow-[0_0_15px_rgba(212,175,55,0.05)]',
+  };
+  
+  return (
+    <div className="bg-[#1E293B] border border-slate-700 rounded-xl p-6 shadow-lg transition-transform hover:-translate-y-1 duration-300">
+      <div className="flex justify-between items-start">
+        <div>
+          <p className="text-[13px] text-slate-400 font-semibold mb-2">{title}</p>
+          <h3 className="text-3xl font-black text-white tracking-tight">{value}</h3>
+        </div>
+        <div className={`p-3 rounded-xl border ${colorMap[color]}`}>
+          {React.cloneElement(icon, { className: 'w-6 h-6' })}
+        </div>
+      </div>
+      <div className="mt-5 pt-4 border-t border-slate-700/50 flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-widest font-bold text-slate-500">{module}</span>
+      </div>
+    </div>
+  );
+};
+
+const TableRow = ({ id, name, vector, severity, status, onValidate }: { id: string, name: string, vector: string, severity: Severity, status: string, onValidate?: () => void }) => {
+  const getSeverityBadge = (sev: Severity) => {
     switch(sev) {
       case 'Crítico': return <span className="inline-flex items-center px-2.5 py-1 rounded text-[11px] font-bold bg-red-500/10 text-red-500 border border-red-500/30 uppercase tracking-wider">CRÍTICO</span>;
+      case 'Alto': return <span className="inline-flex items-center px-2.5 py-1 rounded text-[11px] font-bold bg-orange-500/10 text-orange-400 border border-orange-500/30 uppercase tracking-wider">ALTO</span>;
       case 'Medio': return <span className="inline-flex items-center px-2.5 py-1 rounded text-[11px] font-bold bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/30 uppercase tracking-wider">MEDIO</span>;
+      case 'Bajo': return <span className="inline-flex items-center px-2.5 py-1 rounded text-[11px] font-bold bg-sky-500/10 text-sky-400 border border-sky-500/30 uppercase tracking-wider">BAJO</span>;
       case 'Info': return <span className="inline-flex items-center px-2.5 py-1 rounded text-[11px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30 uppercase tracking-wider">INFO</span>;
+      case 'Desconocido': return <span className="inline-flex items-center px-2.5 py-1 rounded text-[11px] font-bold bg-slate-500/10 text-slate-400 border border-slate-500/30 uppercase tracking-wider">DESCONOCIDO</span>;
       default: return null;
     }
   };

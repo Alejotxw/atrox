@@ -1,12 +1,14 @@
+import asyncio
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from atrox.api.audit import router as audit_router
+from atrox.api.auth import router as auth_router
 from atrox.api.console import router as console_router
 from atrox.api.credentials import router as credentials_router
 from atrox.api.discovery import router as discovery_router
@@ -17,8 +19,11 @@ from atrox.api.payloads import router as payloads_router
 from atrox.api.reports import router as reports_router
 from atrox.api.scans import router as scans_router
 from atrox.api.scoring import router as scoring_router
+from atrox.api.threats import router as threats_router
+from atrox.api.validate import router as validate_router
 from atrox.api.vectors import router as vectors_router
 from atrox.api.vulnscan import router as vulnscan_router
+from atrox.ai.schemas.rejections import build_rejection_logger
 from atrox.config import get_settings
 from atrox.console.bus import get_scan_log_bus
 from atrox.findings.store import FalsePositiveStore
@@ -28,9 +33,12 @@ from atrox.queue.service import JobQueue
 from atrox.scanner.nmap_wrapper import NmapWrapper
 from atrox.scanner.nuclei_wrapper import NucleiWrapper
 from atrox.security.audit_deps import build_audit_log_service
+from atrox.security.auth_deps import require_mfa_admin
 from atrox.security.deps import get_encryption_service_from_settings
 from atrox.security.encryption import EncryptionKeyError
+from atrox.security.mfa_service import MfaService
 from atrox.security.sensitive_fields import SensitiveFieldEncryptor
+from atrox.threat_intel.service import build_nvd_sync_service
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +57,7 @@ async def _dispatch_scan(job: Job) -> dict:
         )
         result = await wrapper.scan(
             target=job.params["target"],
-            port_range=job.params.get("port_range"),
+            port_range=job.params.get("port_range", "1-1024"),
         )
         return result.model_dump()
 
@@ -94,6 +102,17 @@ async def lifespan(app: FastAPI):
     global _persistence
     settings = get_settings()
 
+    # Servicio MFA (HU-018)
+    mfa_service = MfaService(
+        admin_username=settings.admin_username,
+        admin_password=settings.admin_password,
+        totp_secret=settings.totp_secret,
+        session_ttl_minutes=settings.session_ttl_minutes,
+        max_failed_attempts=settings.mfa_max_failed_attempts,
+        lockout_minutes=settings.mfa_lockout_minutes,
+    )
+    app.state.mfa_service = mfa_service
+
     job_queue = JobQueue(
         max_concurrent=settings.max_concurrent_scans,
         max_queue_size=settings.queue_max_size,
@@ -109,6 +128,10 @@ async def lifespan(app: FastAPI):
         audit_log = build_audit_log_service()
         await audit_log.purge_expired()
         app.state.audit_log = audit_log
+
+    # Log de rechazos de respuestas IA (HU-017): en memoria por defecto;
+    # persiste a JSONL solo si ATROX_LLM_REJECTION_LOG_PATH está configurado.
+    app.state.llm_rejections = build_rejection_logger(settings.llm_rejection_log_path)
 
     # Persistencia cifrada (HU-007)
     app.state.persistence = None
@@ -133,7 +156,31 @@ async def lifespan(app: FastAPI):
         encryptor=fp_encryptor,
     )
 
+    # Sincronización diaria NVD (HU-005 / RF-010): el scheduler duerme
+    # primero, así el arranque no hace llamadas de red; la primera
+    # sincronización se dispara manualmente (POST /api/threats/sync o CLI).
+    nvd_sync_service = build_nvd_sync_service()
+    app.state.nvd_sync_service = nvd_sync_service
+    app.state.nvd_sync_task = None
+    app.state.nvd_startup_sync_task = None
+    if settings.nvd_sync_enabled:
+        app.state.nvd_sync_task = asyncio.create_task(
+            nvd_sync_service.run_daily(
+                interval_seconds=settings.nvd_sync_interval_hours * 3600
+            )
+        )
+        if settings.nvd_sync_on_startup:
+            app.state.nvd_startup_sync_task = asyncio.create_task(
+                nvd_sync_service.sync_once_safe()
+            )
+
     yield
+
+    for attr in ("nvd_sync_task", "nvd_startup_sync_task"):
+        task = getattr(app.state, attr, None)
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     await job_queue.shutdown()
     _persistence = None
@@ -154,15 +201,18 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(health_router)
+    application.include_router(auth_router)
     application.include_router(discovery_router)
     application.include_router(vulnscan_router)
     application.include_router(jobs_router)
     application.include_router(console_router)
     application.include_router(scans_router)
-    application.include_router(audit_router)
+    application.include_router(audit_router, dependencies=[Depends(require_mfa_admin)])
     application.include_router(vectors_router)
     application.include_router(payloads_router)
     application.include_router(scoring_router)
+    application.include_router(validate_router)
+    application.include_router(threats_router)
     application.include_router(findings_router)
     application.include_router(credentials_router)
     application.include_router(reports_router)

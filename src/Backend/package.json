@@ -4,14 +4,30 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/**/*.test.js",
+    "start": "node index.js",
+    "scheduler": "node scheduler.js",
+    "sync-cves": "node -e \"require('./services/nvdService')()\"",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "axios": "^1.18.1",
+    "better-sqlite3": "^12.11.1",
     "cors": "^2.8.6",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "node-cron": "^4.5.0",
+    "prisma": "^7.8.0"
+  },
+  "allowScripts": {
+    "@prisma/engines@7.8.0": true,
+    "prisma@7.8.0": true,
+    "better-sqlite3@12.11.1": true
   }
 }

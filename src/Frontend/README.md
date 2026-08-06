@@ -35,6 +35,35 @@ npm run test:watch  # vitest en modo watch
 
 **Nota:** `eslint.config.js` solo lintea `**/*.{js,jsx}`; los archivos `.ts`/`.tsx` (incluyendo `App.tsx` y todo `components/ui/`) no pasan por lint hoy. Tampoco hay `typescript` instalado ni `tsconfig.json`, así que los tipos en archivos `.ts`/`.tsx` no se verifican en build (`vite build` no corre `tsc`). Extender el lint/type-check a TS es trabajo pendiente, no cubierto por esta tarea.
 
+## Dashboard de KPIs (HU-019)
+
+Panel superior del tab **Dashboard** (`src/app/pages/Dashboard.tsx`):
+
+- KPIs: activos descubiertos, puertos/servicios, vulnerabilidades críticas, escaneos activos
+- Datos desde `GET /api/jobs` + `GET /api/scans/{id}` (HU-010)
+- Polling cada 5 s sin recargar la página
+- Grid responsive desktop: 1 → 2 → 4 columnas
+
+Documentación Lighthouse: [`docs/Frontend/HU-019-lighthouse.md`](../../docs/Frontend/HU-019-lighthouse.md)
+
+```bash
+npm run test -- dashboardMetrics
+```
+
+## Consola en vivo (HU-020)
+
+Componente `src/app/components/ScanConsole/ScanConsole.tsx` en el Dashboard:
+
+- Stream SSE: `GET /api/console/stream` (timestamp, módulo, severidad)
+- Demo: `POST /api/console/simulate` al pulsar **Iniciar Auditoría Automatizada**
+- Auto-scroll configurable (checkbox en el header)
+- Reconexión automática si cae el EventSource
+- Los jobs reales (`POST /api/jobs`) también emiten líneas de ciclo de vida al mismo bus
+
+```bash
+npm run test -- scanConsole
+```
+
 ## Gestión de Hallazgos (HU-021)
 
 Tab **"Gestión de Hallazgos"** en el sidebar (`src/app/components/findings/FindingsManagementView.tsx`). Dado un `scan_id` (obtenido de `POST /api/scans`, HU-009), integra tres endpoints del backend:

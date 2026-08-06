@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   ShieldAlert, 
-  TerminalSquare, 
   Database, 
   Radar, 
   ScanLine, 
@@ -33,6 +32,8 @@ import {
 } from 'lucide-react';
 import FindingsManagementView from './components/findings/FindingsManagementView';
 import LoginForm from './components/auth/LoginForm';
+import ScanConsole from './components/ScanConsole/ScanConsole';
+import DashboardMetricsPanel from './pages/Dashboard';
 import {
   createScan,
   getScanDetail,
@@ -120,19 +121,6 @@ function describeThreatLevel(vectors: AttackVector[]): { label: string; classNam
 
 // --- Datos Iniciales Simulados para la vista inicial (placeholder previo al primer escaneo real) ---
 const INITIAL_METRICS = { hosts: "42", ports: "8", vulns: "3", report: "Generando" };
-const INITIAL_LOGS = [
-  { id: 1, time: '14:02:11', module: 'INFO', color: 'text-blue-400', text: 'Starting AI-Pentest Framework v1.0' },
-  { id: 2, time: '14:02:12', module: 'NMAP', color: 'text-purple-400', text: 'Scanning target: corp.internal.uide.edu.ec' },
-  { id: 3, time: '14:02:45', module: 'NMAP', color: 'text-purple-400', text: 'Discovered open port 80/tcp (http)' },
-  { id: 4, time: '14:02:45', module: 'NMAP', color: 'text-purple-400', text: 'Discovered open port 443/tcp (https)' },
-  { id: 5, time: '14:02:45', module: 'NMAP', color: 'text-purple-400', text: 'Discovered open port 3306/tcp (mysql)' },
-  { id: 6, time: '14:03:10', module: 'NUCLEI', color: 'text-emerald-400', text: 'Loading templates for web vulnerabilities...' },
-  { id: 7, time: '14:03:15', module: 'NUCLEI', color: 'text-emerald-400', isCritical: true, text: 'SQL Injection found on /login.php (parameter \'user\')' },
-  { id: 8, time: '14:03:18', module: 'NUCLEI', color: 'text-emerald-400', isCritical: true, text: 'Apache Path Traversal (CVE-2021-41773) in /cgi-bin/' },
-  { id: 9, time: '14:03:22', module: 'NUCLEI', color: 'text-emerald-400', isMedium: true, text: 'Default credentials allowed on MySQL Port 3306' },
-  { id: 10, time: '14:03:25', module: 'OLLAMA', color: 'text-[#D4AF37]', text: 'Feeding findings to Local Llama 3 Engine for correlation...' },
-  { id: 11, time: '14:03:28', module: 'OLLAMA', color: 'text-[#D4AF37]', text: 'Generating mitigation strategies based on CVE databases...' }
-];
 const INITIAL_FINDINGS: FindingRow[] = [
   { id: 'VULN-001', name: 'SQL Injection (Blind)', vector: 'HTTP POST /login.php', severity: 'Crítico', status: 'checked' },
   { id: 'VULN-002', name: 'Apache Path Traversal (CVE-2021-41773)', vector: 'GET /cgi-bin/', severity: 'Crítico', status: 'checked' },
@@ -151,15 +139,14 @@ export default function App() {
   const [isAuditing, setIsAuditing] = useState(false);
   
   const [metrics, setMetrics] = useState(INITIAL_METRICS);
-  const [logs, setLogs] = useState(INITIAL_LOGS);
   const [findings, setFindings] = useState<FindingRow[]>(INITIAL_FINDINGS);
   const [showInsights, setShowInsights] = useState(true);
   const [attackVectors, setAttackVectors] = useState<AttackVector[]>([]);
   const [backendHealth, setBackendHealth] = useState<'checking' | 'online' | 'offline'>('checking');
   const [lastScanId, setLastScanId] = useState<string | null>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [auditToken, setAuditToken] = useState(0);
 
-  const logsEndRef = useRef<HTMLDivElement>(null);
   const auditRunIdRef = useRef(0);
 
   // --- VERIFICACIÓN DE SESIÓN MFA ACTIVA ---
@@ -194,11 +181,6 @@ export default function App() {
     }
   };
 
-  // --- AUTO-SCROLL DE LA CONSOLA ---
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
-
   // --- VERIFICACIÓN PERIÓDICA DE SALUD DEL BACKEND ---
   useEffect(() => {
     let cancelled = false;
@@ -225,9 +207,7 @@ export default function App() {
     };
   }, []);
 
-  const getCurrentTime = () => new Date().toTimeString().split(' ')[0];
-
-  // --- MOTOR REAL DE AUDITORÍA (discovery -> vulnscan -> análisis de vectores) ---
+  // --- MOTOR REAL DE AUDITORÍA (discovery -> vulnscan -> análisis de vectores; consola en vivo vía SSE HU-020) ---
   const handleStartAudit = async () => {
     if (isAuditing || !targetUrl.trim()) return;
 
@@ -238,24 +218,15 @@ export default function App() {
     const target = normalizeTarget(targetUrl);
 
     setIsAuditing(true);
-    setLogs([]);
+    setAuditToken((n) => n + 1);
     setFindings([]);
     setAttackVectors([]);
     setShowInsights(false);
     setMetrics({ hosts: "0", ports: "0", vulns: "0", report: "Iniciando" });
 
-    const addLog = (module: string, color: string, text: string, isCritical = false, isMedium = false) => {
-      if (!isCurrent()) return;
-      setLogs(prev => [...prev, { id: Date.now() + Math.random(), time: getCurrentTime(), module, color, text, isCritical, isMedium }]);
-    };
-
     try {
-      addLog('INFO', 'text-blue-400', 'Iniciando auditoría automatizada.');
-      if (target !== targetUrl.trim()) {
-        addLog('INFO', 'text-blue-400', `Objetivo normalizado a "${target}" (el backend solo acepta IP o dominio, sin esquema/ruta).`);
-      }
       if (!target) {
-        addLog('ERROR', 'text-red-400', 'Objetivo inválido tras normalizar — verifica que sea una IP o dominio.', true);
+        alert('Objetivo inválido tras normalizar — verifica que sea una IP o dominio.');
         setMetrics(m => ({ ...m, report: "Error" }));
         setIsAuditing(false);
         return;
@@ -264,13 +235,12 @@ export default function App() {
       // Paso 1: Discovery (Nmap)
       const discoveryScan = await createScan(target, 'discovery');
       if (!isCurrent()) return;
-      addLog('NMAP', 'text-purple-400', `Escaneo de descubrimiento iniciado (scan_id: ${discoveryScan.scan_id})`);
 
       const discoveryDetail = await pollScanUntilDone(discoveryScan.scan_id, isCurrent);
       if (!isCurrent() || !discoveryDetail) return;
 
       if (discoveryDetail.status === 'failed') {
-        addLog('NMAP', 'text-red-400', `Descubrimiento fallido: ${discoveryDetail.error ?? 'error desconocido'}`, true);
+        alert(`Descubrimiento fallido: ${discoveryDetail.error ?? 'error desconocido'}`);
         setMetrics(m => ({ ...m, report: "Error" }));
         return;
       }
@@ -278,19 +248,17 @@ export default function App() {
       const hosts = discoveryDetail.assets;
       const totalPorts = hosts.reduce((acc, h) => acc + h.ports.length, 0);
       setMetrics(m => ({ ...m, hosts: String(hosts.length), ports: String(totalPorts) }));
-      addLog('NMAP', 'text-purple-400', `Descubrimiento completado: ${hosts.length} host(s), ${totalPorts} puerto(s) abiertos.`);
 
       // Paso 2: Vulnscan (Nuclei)
       const vulnScan = await createScan(target, 'vulnscan');
       if (!isCurrent()) return;
       setLastScanId(String(vulnScan.scan_id));
-      addLog('NUCLEI', 'text-emerald-400', `Escaneo de vulnerabilidades iniciado (scan_id: ${vulnScan.scan_id})`);
 
       const vulnDetail = await pollScanUntilDone(vulnScan.scan_id, isCurrent, { pageSize: 100 });
       if (!isCurrent() || !vulnDetail) return;
 
       if (vulnDetail.status === 'failed') {
-        addLog('NUCLEI', 'text-red-400', `Escaneo de vulnerabilidades fallido: ${vulnDetail.error ?? 'error desconocido'}`, true);
+        alert(`Escaneo de vulnerabilidades fallido: ${vulnDetail.error ?? 'error desconocido'}`);
         setMetrics(m => ({ ...m, report: "Error" }));
         return;
       }
@@ -304,20 +272,16 @@ export default function App() {
         status: 'unchecked' as const,
       })));
       setMetrics(m => ({ ...m, vulns: String(vulnDetail.findings.total) }));
-      addLog('NUCLEI', 'text-emerald-400', `Escaneo completado: ${vulnDetail.findings.total} hallazgo(s) detectado(s).`, vulnDetail.findings.total > 0);
 
       // Paso 3: Correlación de vectores de ataque (motor heurístico)
       if (items.length > 0) {
-        addLog('CORRELATOR', 'text-[#D4AF37]', 'Correlacionando hallazgos en vectores de ataque...');
         try {
           const analysis = await analyzeVectors(items);
           if (!isCurrent()) return;
           setAttackVectors(analysis.vectors);
-          addLog('CORRELATOR', 'text-[#D4AF37]', `Análisis completado: ${analysis.vectors.length} vector(es) de ataque identificados.`);
-        } catch (err) {
+        } catch {
           if (!isCurrent()) return;
           setAttackVectors([]);
-          addLog('CORRELATOR', 'text-red-400', `No se pudo completar el análisis de vectores: ${describeError(err)}`, true);
         }
       } else {
         setAttackVectors([]);
@@ -328,7 +292,7 @@ export default function App() {
       setMetrics(m => ({ ...m, report: "Completado" }));
     } catch (err) {
       if (!isCurrent()) return;
-      addLog('ERROR', 'text-red-400', describeError(err), true);
+      alert(`Error durante la auditoría: ${describeError(err)}`);
       setMetrics(m => ({ ...m, report: "Error" }));
     } finally {
       if (isCurrent()) setIsAuditing(false);
@@ -530,7 +494,10 @@ export default function App() {
             {/* MAIN CONTENT VIEWS */}
             {activeTab === 'Dashboard' && (
               <>
-                {/* 3. Panel Superior de Métricas */}
+                {/* HU-019 — KPIs globales reales desde HU-010 (polling sin recarga) */}
+                <DashboardMetricsPanel />
+
+                {/* 3. Panel de Progreso de la Auditoría en Curso */}
                 <div className="grid grid-cols-4 gap-6 animate-in fade-in duration-300">
                   <MetricCard
                     title="Hosts Descubiertos"
@@ -539,68 +506,41 @@ export default function App() {
                     icon={<Network />}
                     color="blue"
                   />
-                  <MetricCard 
-                    title="Puertos y Servicios" 
-                    value={metrics.ports} 
-                    module="Módulo Nmap" 
-                    icon={<Server />} 
-                    color="indigo" 
+                  <MetricCard
+                    title="Puertos y Servicios"
+                    value={metrics.ports}
+                    module="Módulo Nmap"
+                    icon={<Server />}
+                    color="indigo"
                   />
-                  <MetricCard 
-                    title="Vulnerabilidades Críticas" 
-                    value={metrics.vulns} 
-                    module="Módulo Nuclei" 
-                    icon={<AlertTriangle />} 
-                    color="red" 
+                  <MetricCard
+                    title="Vulnerabilidades Críticas"
+                    value={metrics.vulns}
+                    module="Módulo Nuclei"
+                    icon={<AlertTriangle />}
+                    color="red"
                   />
-                  <MetricCard 
-                    title="Estado del Reporte" 
-                    value={metrics.report} 
-                    module="Módulo ReportLab" 
-                    icon={<FileText />} 
-                    color="gold" 
+                  <MetricCard
+                    title="Estado del Reporte"
+                    value={metrics.report}
+                    module="Módulo ReportLab"
+                    icon={<FileText />}
+                    color="gold"
                   />
                 </div>
 
                 {/* 4. Área Central - El Núcleo del Proyecto */}
-                <div className="grid grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-both">
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-100 fill-mode-both">
                   
-                  {/* Consola de Ejecución */}
-                  <div className="col-span-2 bg-[#000000] border border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-2xl relative">
-                    <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/20 pointer-events-none"></div>
-                    <div className="bg-[#1E293B] px-5 py-3 border-b border-slate-800 flex items-center justify-between z-10">
-                      <div className="flex items-center gap-2.5">
-                        <TerminalSquare className="w-4 h-4 text-slate-400" />
-                        <span className="text-xs font-mono text-slate-300 font-semibold tracking-wide">Consola de Ejecución UNIX</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <div className="w-3 h-3 rounded-full bg-red-500/90 shadow-[0_0_5px_rgba(239,68,68,0.5)]"></div>
-                        <div className="w-3 h-3 rounded-full bg-yellow-500/90 shadow-[0_0_5px_rgba(234,179,8,0.5)]"></div>
-                        <div className="w-3 h-3 rounded-full bg-green-500/90 shadow-[0_0_5px_rgba(34,197,94,0.5)]"></div>
-                      </div>
-                    </div>
-                    <div className="p-6 font-mono text-[13px] text-slate-300 leading-relaxed overflow-y-auto h-[420px] space-y-1.5 z-10 scroll-smooth">
-                      <div className="text-slate-500">root@ai-pentest:~# ./run_audit.sh --target {targetUrl}</div>
-                      {logs.map((log) => (
-                        <div key={log.id} className="text-slate-500 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                          [{log.time}] <span className={`${log.color} font-semibold`}>[{log.module}]</span>{' '}
-                          {log.isCritical && <span className="text-red-400 font-bold">[CRITICAL] </span>}
-                          {log.isMedium && <span className="text-[#D4AF37] font-bold">[MEDIUM] </span>}
-                          {log.text}
-                        </div>
-                      ))}
-                      {isAuditing && (
-                        <div className="flex items-center gap-2 mt-3">
-                          <span className="text-green-400">root@ai-pentest:~#</span>
-                          <span className="w-2.5 h-4 bg-slate-300 animate-pulse"></span>
-                        </div>
-                      )}
-                      <div ref={logsEndRef} />
-                    </div>
-                  </div>
+                  {/* Consola de Ejecución — stream SSE (HU-020) */}
+                  <ScanConsole
+                    targetUrl={targetUrl}
+                    auditToken={auditToken}
+                    isAuditing={isAuditing}
+                  />
 
                   {/* Módulo de IA - Ollama Insights */}
-                  <div className="col-span-1 bg-gradient-to-br from-[#1E293B] via-[#141E30] to-[#0B1121] border border-[#D4AF37]/50 rounded-xl overflow-hidden shadow-[0_0_25px_rgba(212,175,55,0.08)] flex flex-col relative">
+                  <div className="xl:col-span-1 bg-gradient-to-br from-[#1E293B] via-[#141E30] to-[#0B1121] border border-[#D4AF37]/50 rounded-xl overflow-hidden shadow-[0_0_25px_rgba(212,175,55,0.08)] flex flex-col relative min-w-0">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-[#D4AF37]/5 blur-3xl rounded-full pointer-events-none"></div>
                     
                     <div className="px-6 py-4 border-b border-[#D4AF37]/20 flex justify-between items-center bg-[#D4AF37]/10 z-10">

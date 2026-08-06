@@ -381,3 +381,39 @@ export async function downloadTechnicalReport(
   window.URL.revokeObjectURL(url);
 }
 
+// -- Tipos que reflejan atrox/queue/models.py (HU-004 / listado para HU-019) ---
+
+export type JobType = 'discovery' | 'vulnscan';
+export type JobStatus = 'pending' | 'running' | 'done' | 'failed';
+
+export interface Job {
+  id: string;
+  job_type: JobType;
+  status: JobStatus;
+  params: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+/** Lista todos los trabajos — base para agregar KPIs del dashboard (HU-019). */
+export function listJobs(): Promise<Job[]> {
+  return request<Job[]>('/api/jobs');
+}
+
+// -- Consola en vivo SSE (HU-020) ---------------------------------------------
+
+export interface ConsoleSimulateResponse {
+  status: string;
+  target: string;
+}
+
+/** Dispara una demo simulada que emite logs por GET /api/console/stream. */
+export function startConsoleDemo(target: string): Promise<ConsoleSimulateResponse> {
+  return request<ConsoleSimulateResponse>('/api/console/simulate', {
+    method: 'POST',
+    body: JSON.stringify({ target }),
+  });
+}

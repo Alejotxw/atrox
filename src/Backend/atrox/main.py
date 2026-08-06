@@ -1,6 +1,7 @@
 import asyncio
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
@@ -8,7 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from atrox.api.audit import router as audit_router
 from atrox.api.auth import router as auth_router
+from atrox.api.console import router as console_router
+from atrox.api.credentials import router as credentials_router
 from atrox.api.discovery import router as discovery_router
+from atrox.api.findings import router as findings_router
 from atrox.api.health import router as health_router
 from atrox.api.jobs import router as jobs_router
 from atrox.api.payloads import router as payloads_router
@@ -21,7 +25,9 @@ from atrox.api.vectors import router as vectors_router
 from atrox.api.vulnscan import router as vulnscan_router
 from atrox.ai.schemas.rejections import build_rejection_logger
 from atrox.config import get_settings
+from atrox.console.bus import get_scan_log_bus
 from atrox.findings.store import FalsePositiveStore
+from atrox.persistence.deps import build_persistence_service
 from atrox.queue.models import Job, JobType
 from atrox.queue.service import JobQueue
 from atrox.scanner.nmap_wrapper import NmapWrapper
@@ -29,9 +35,15 @@ from atrox.scanner.nuclei_wrapper import NucleiWrapper
 from atrox.security.audit_deps import build_audit_log_service
 from atrox.security.auth_deps import require_mfa_admin
 from atrox.security.deps import get_encryption_service_from_settings
+from atrox.security.encryption import EncryptionKeyError
 from atrox.security.mfa_service import MfaService
 from atrox.security.sensitive_fields import SensitiveFieldEncryptor
 from atrox.threat_intel.service import build_nvd_sync_service
+
+logger = logging.getLogger(__name__)
+
+# Referencia al servicio de persistencia cifrada para el dispatcher de jobs
+_persistence = None
 
 
 async def _dispatch_scan(job: Job) -> dict:
@@ -54,16 +66,40 @@ async def _dispatch_scan(job: Job) -> dict:
         nuclei_path=settings.nuclei_path,
         timeout_seconds=settings.nuclei_timeout_seconds,
     )
+    severity_param = job.params.get("severity") or job.params.get("severities")
+    if isinstance(severity_param, str):
+        severities = [s.strip() for s in severity_param.split(",") if s.strip()]
+    else:
+        severities = severity_param
+
     result = await wrapper_nuclei.scan(
         target=job.params["target"],
         templates=job.params.get("templates"),
-        severities=job.params.get("severities"),
+        severities=severities,
+        tags=job.params.get("tags"),
     )
-    return result.model_dump()
+    payload = result.model_dump()
+
+    # Persistir hallazgos cifrados y dejar el result del job también cifrado
+    if _persistence is not None and payload.get("findings"):
+        try:
+            await _persistence.save_findings_from_vulnscan(
+                result.findings,
+                job_id=job.id,
+            )
+            payload = _persistence.encrypt_job_result(payload)
+        except Exception:
+            logger.exception(
+                "No se pudieron cifrar/persistir hallazgos del job %s",
+                job.id,
+            )
+
+    return payload
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _persistence
     settings = get_settings()
 
     # Servicio MFA (HU-018)
@@ -82,6 +118,7 @@ async def lifespan(app: FastAPI):
         max_queue_size=settings.queue_max_size,
     )
     app.state.job_queue = job_queue
+    app.state.scan_log_bus = get_scan_log_bus()
 
     executor = ProcessPoolExecutor(max_workers=settings.parse_workers)
     await job_queue.start(scanner=_dispatch_scan, executor=executor)
@@ -96,9 +133,24 @@ async def lifespan(app: FastAPI):
     # persiste a JSONL solo si ATROX_LLM_REJECTION_LOG_PATH está configurado.
     app.state.llm_rejections = build_rejection_logger(settings.llm_rejection_log_path)
 
+    # Persistencia cifrada (HU-007)
+    app.state.persistence = None
+    _persistence = None
+    if settings.encryption_master_key:
+        try:
+            persistence = build_persistence_service()
+            app.state.persistence = persistence
+            _persistence = persistence
+        except EncryptionKeyError:
+            logger.warning("Cifrado no inicializado: llave inválida o ausente")
+
+    # Store de falsos positivos (HU-022), opcionalmente con cifrado
     fp_encryptor = None
     if settings.encryption_master_key:
-        fp_encryptor = SensitiveFieldEncryptor(get_encryption_service_from_settings())
+        try:
+            fp_encryptor = SensitiveFieldEncryptor(get_encryption_service_from_settings())
+        except EncryptionKeyError:
+            logger.warning("Encryptor de falsos positivos no inicializado")
     app.state.false_positive_store = FalsePositiveStore(
         store_path=Path(settings.false_positive_store_path),
         encryptor=fp_encryptor,
@@ -131,6 +183,7 @@ async def lifespan(app: FastAPI):
             await asyncio.gather(task, return_exceptions=True)
 
     await job_queue.shutdown()
+    _persistence = None
 
 
 def create_app() -> FastAPI:
@@ -152,6 +205,7 @@ def create_app() -> FastAPI:
     application.include_router(discovery_router)
     application.include_router(vulnscan_router)
     application.include_router(jobs_router)
+    application.include_router(console_router)
     application.include_router(scans_router)
     application.include_router(audit_router, dependencies=[Depends(require_mfa_admin)])
     application.include_router(vectors_router)
@@ -159,6 +213,8 @@ def create_app() -> FastAPI:
     application.include_router(scoring_router)
     application.include_router(validate_router)
     application.include_router(threats_router)
+    application.include_router(findings_router)
+    application.include_router(credentials_router)
     application.include_router(reports_router)
     return application
 

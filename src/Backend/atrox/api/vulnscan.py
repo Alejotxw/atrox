@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from atrox.config import Settings, get_settings
 from atrox.scanner.models import VulnScanRequest, VulnScanResult
@@ -17,12 +17,20 @@ def get_nuclei_wrapper(settings: Settings = Depends(get_settings)) -> NucleiWrap
 
 @router.post("/scan", response_model=VulnScanResult)
 async def run_vuln_scan(
-    request: VulnScanRequest,
+    request_body: VulnScanRequest,
+    request: Request,
     scanner: NucleiWrapper = Depends(get_nuclei_wrapper),
 ) -> VulnScanResult:
-    return await scanner.scan(
-        target=request.target,
-        templates=request.templates or None,
-        severities=request.severities or None,
-        tags=request.tags or None,
+    """Ejecuta Nuclei y, si el cifrado está activo, persiste hallazgos cifrados."""
+    result = await scanner.scan(
+        target=request_body.target,
+        templates=request_body.templates or None,
+        severities=request_body.severities or None,
+        tags=request_body.tags or None,
     )
+
+    persistence = getattr(request.app.state, "persistence", None)
+    if persistence is not None and result.findings:
+        await persistence.save_findings_from_vulnscan(result.findings)
+
+    return result

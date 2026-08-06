@@ -5,6 +5,11 @@ Rutas protegidas por MFA:
 - `POST /api/reports/executive`: Genera un PDF ejecutivo a partir de datos explícitos.
 - `GET /api/reports/technical/{scan_id}?format=pdf|html`: Genera y descarga el reporte técnico detallado (HU-024).
 - `POST /api/reports/technical?format=pdf|html`: Genera un reporte técnico a partir de datos explícitos.
+
+Rutas de persistencia cifrada (HU-007):
+- `POST /api/reports`: Persiste un reporte cifrando contenido sensible en reposo.
+- `GET /api/reports`: Lista los reportes persistidos.
+- `GET /api/reports/{report_id}`: Obtiene un reporte persistido por ID.
 """
 
 import re
@@ -13,6 +18,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from atrox.api.jobs import get_job_queue
+from atrox.persistence.deps import get_persistence
+from atrox.persistence.models import ReportCreate, ReportRecord
+from atrox.persistence.service import EncryptedPersistenceService
 from atrox.queue.service import JobQueue
 from atrox.reports.generator import ExecutiveReportGenerator
 from atrox.reports.models import ExecutiveReportData, SeverityHeatmap, TechnicalFindingItem, TechnicalReportData, TopRiskItem
@@ -392,3 +400,33 @@ async def generate_custom_technical_report(
             "X-Report-Template-Version": body.template_version,
         },
     )
+
+
+# ── Endpoints de Persistencia Cifrada (HU-007) ─────────────────────────────
+
+
+@router.post("", status_code=201, response_model=ReportRecord)
+async def create_report(
+    body: ReportCreate,
+    store: EncryptedPersistenceService = Depends(get_persistence),
+) -> ReportRecord:
+    """Persiste un reporte cifrando contenido sensible en reposo."""
+    return await store.save_report(body)
+
+
+@router.get("", response_model=list[ReportRecord])
+async def list_reports(
+    store: EncryptedPersistenceService = Depends(get_persistence),
+) -> list[ReportRecord]:
+    return await store.list_reports(decrypt=True)
+
+
+@router.get("/{report_id}", response_model=ReportRecord)
+async def get_report(
+    report_id: UUID,
+    store: EncryptedPersistenceService = Depends(get_persistence),
+) -> ReportRecord:
+    record = await store.get_report(report_id, decrypt=True)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Reporte no encontrado")
+    return record

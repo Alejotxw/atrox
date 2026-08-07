@@ -86,10 +86,13 @@ class TestLlmSettings:
         settings = make_settings()
         assert settings.llm_provider == "mock"
         assert settings.llm_model is None
-        assert settings.llm_timeout_seconds == 30
+        assert settings.llm_timeout_seconds == 180
         assert settings.llm_gemini_model == "gemini-2.0-flash"
         assert settings.llm_ollama_base_url == "http://localhost:11434"
         assert settings.llm_ollama_model == "llama3"
+        assert settings.llm_ollama_num_predict == 640
+        assert settings.llm_ollama_num_ctx == 4096
+        assert settings.llm_ollama_keep_alive == "10m"
         assert settings.llm_fallback_providers == []
 
     def test_env_override(self, monkeypatch) -> None:

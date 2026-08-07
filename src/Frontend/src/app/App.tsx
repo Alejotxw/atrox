@@ -63,6 +63,7 @@ import {
   fetchDashboardKpis,
   type DashboardKpis,
 } from './lib/dashboardMetrics';
+import { prioritizeFindingsForAi } from './lib/findingsView';
 import { normalizeTarget } from './lib/target';
 
 // --- Tipos locales de la vista de hallazgos ---
@@ -329,18 +330,30 @@ export default function App() {
         status: 'unchecked' as const,
       })));
 
-      // Paso 3: Análisis de vectores de ataque (IA real vía Ollama si está
-      // configurada; el backend cae al motor heurístico si no responde)
+      // Paso 3: Análisis de vectores (IA). Solo top hallazgos por severidad
+      // para no saturar Ollama; si falla, la auditoría NO se corta.
       if (items.length > 0) {
         try {
-          const analysis = await analyzeVectors(items);
+          const analysis = await analyzeVectors(prioritizeFindingsForAi(items));
           if (!isCurrent()) return;
           setAttackVectors(analysis.vectors);
           setVectorAnalysisMeta({ source: analysis.source, model_used: analysis.model_used });
+          if (analysis.source === 'heuristic') {
+            setAuditWarning(
+              (prev) =>
+                prev ??
+                'Análisis IA no disponible o lento: se usó correlación heurística (auditoría completa).',
+            );
+          }
         } catch {
           if (!isCurrent()) return;
           setAttackVectors([]);
           setVectorAnalysisMeta(null);
+          setAuditWarning(
+            (prev) =>
+              prev ??
+              'Análisis de vectores omitido por error temporal; el resto de la auditoría se completó.',
+          );
         }
       } else {
         setAttackVectors([]);

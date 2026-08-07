@@ -15,6 +15,29 @@ import type { AttackVector, ConfidenceScoreResult, VulnFinding } from './api';
 // en páginas con page_size > 10.
 export const VECTORS_BATCH_SIZE = 10;
 
+const SEVERITY_RANK: Record<VulnFinding['severity'], number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+  info: 4,
+  unknown: 5,
+};
+
+/** Prioriza criticidad y recorta el lote enviado al análisis IA (menos carga). */
+export function prioritizeFindingsForAi(
+  findings: VulnFinding[],
+  limit: number = VECTORS_BATCH_SIZE,
+): VulnFinding[] {
+  return [...findings]
+    .sort((a, b) => {
+      const bySev = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
+      if (bySev !== 0) return bySev;
+      return a.template_id.localeCompare(b.template_id);
+    })
+    .slice(0, Math.max(0, limit));
+}
+
 export function chunk<T>(items: T[], size: number): T[][] {
   if (size <= 0) return [items];
   const chunks: T[][] = [];

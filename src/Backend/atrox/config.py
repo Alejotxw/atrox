@@ -69,10 +69,18 @@ class Settings(BaseSettings):
     llm_provider: str = "mock"
     llm_model: str | None = None
     llm_api_key: str | None = None
-    llm_timeout_seconds: int = 30
+    # 180s: modelos locales (llama3/etc.) suelen superar 30s en el primer
+    # análisis; un timeout corto cortaba la auditoría con error de red.
+    llm_timeout_seconds: int = 180
     llm_gemini_model: str = "gemini-2.0-flash"
     llm_ollama_base_url: str = "http://localhost:11434"
     llm_ollama_model: str = "llama3"
+    # Limita tokens de salida en Ollama para acortar latencia de generación.
+    llm_ollama_num_predict: int = 640
+    # Contexto más chico = menos RAM/CPU por request en modelos locales.
+    llm_ollama_num_ctx: int = 4096
+    # Mantiene el modelo cargado entre llamadas (evita recargas lentas).
+    llm_ollama_keep_alive: str = "10m"
     llm_fallback_providers: list[str] = []
 
     # Sincronización diaria de base de amenazas NVD (HU-005 / RF-010)

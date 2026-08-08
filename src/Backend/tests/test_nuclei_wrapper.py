@@ -398,6 +398,85 @@ class TestNucleiWrapperCLIArgs:
         assert "-or" in args
 
 
+class TestNucleiWrapperPerformanceFlags:
+    """Flags que acotan el tiempo total del escaneo (-c/-timeout/-retries/-etags).
+
+    Todos son opcionales (None = usar el default propio de Nuclei) para no
+    romper la construcción de comandos en tests que no los configuran."""
+
+    def test_scan_adds_concurrency_flag_when_configured(self) -> None:
+        captured_args: list[list[str]] = []
+
+        async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
+            captured_args.append(args)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(runner=capturing_runner, concurrency=50)
+        asyncio.run(wrapper.scan("192.168.1.10"))
+
+        args = captured_args[0]
+        assert "-c" in args
+        assert args[args.index("-c") + 1] == "50"
+
+    def test_scan_adds_request_timeout_flag_when_configured(self) -> None:
+        captured_args: list[list[str]] = []
+
+        async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
+            captured_args.append(args)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(runner=capturing_runner, request_timeout_seconds=5)
+        asyncio.run(wrapper.scan("192.168.1.10"))
+
+        args = captured_args[0]
+        assert "-timeout" in args
+        assert args[args.index("-timeout") + 1] == "5"
+
+    def test_scan_adds_retries_flag_when_configured(self) -> None:
+        captured_args: list[list[str]] = []
+
+        async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
+            captured_args.append(args)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(runner=capturing_runner, retries=0)
+        asyncio.run(wrapper.scan("192.168.1.10"))
+
+        args = captured_args[0]
+        assert "-retries" in args
+        assert args[args.index("-retries") + 1] == "0"
+
+    def test_scan_adds_exclude_tags_flag_when_configured(self) -> None:
+        captured_args: list[list[str]] = []
+
+        async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
+            captured_args.append(args)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(runner=capturing_runner, exclude_tags=["dos", "fuzz"])
+        asyncio.run(wrapper.scan("192.168.1.10"))
+
+        args = captured_args[0]
+        assert "-etags" in args
+        assert args[args.index("-etags") + 1] == "dos,fuzz"
+
+    def test_scan_omits_performance_flags_when_not_configured(self) -> None:
+        captured_args: list[list[str]] = []
+
+        async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
+            captured_args.append(args)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(runner=capturing_runner)
+        asyncio.run(wrapper.scan("192.168.1.10"))
+
+        args = captured_args[0]
+        assert "-c" not in args
+        assert "-timeout" not in args
+        assert "-retries" not in args
+        assert "-etags" not in args
+
+
 class TestRealSubprocessPath:
     """Sin `runner` inyectado: usa subprocess.Popen bloqueante en un hilo del
     executor (no asyncio.create_subprocess_exec) — funciona incluso bajo

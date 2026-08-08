@@ -57,3 +57,23 @@ async def require_mfa_admin(
 
     session_info["session_token"] = session_token
     return session_info
+
+
+async def require_super_admin(session_info: dict = Depends(require_mfa_admin)) -> dict:
+    """Como `require_mfa_admin`, pero exige además que la sesión sea la del
+    sysadmin único — no basta con cualquier sesión válida.
+
+    Necesario porque las cuentas regulares (creadas al aprobar una solicitud
+    de acceso, login sin TOTP) comparten el mismo pool de sesiones que el
+    sysadmin — `require_mfa_admin` por sí solo NO distingue quién es el
+    dueño de la sesión, solo que el token es válido. Usar esta dependencia
+    en cualquier endpoint de gestión de usuarios/solicitudes para que una
+    cuenta regular no pueda auto-otorgarse privilegios de administración.
+    """
+    settings = get_settings()
+    if session_info.get("username") != settings.admin_username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta acción requiere privilegios de super administrador.",
+        )
+    return session_info

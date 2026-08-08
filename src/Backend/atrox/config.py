@@ -39,6 +39,25 @@ class Settings(BaseSettings):
     # modo Docker — sin esto, cada contenedor `--rm` re-descarga el catálogo
     # completo (varios minutos) en cada escaneo. None desactiva el montaje.
     nuclei_docker_templates_volume: str | None = "atrox-nuclei-templates"
+    # Workers de plantillas en paralelo (flag -c). El default propio de
+    # Nuclei (25) es conservador: contra un objetivo con muchos puertos
+    # cerrados/lentos, el tiempo total escala con la cola de plantillas
+    # pendientes más que con el ancho de banda disponible.
+    nuclei_concurrency: int = 50
+    # Timeout por request individual en segundos (flag -timeout, default de
+    # Nuclei: 10s). Bajarlo evita que un puerto/endpoint colgado consuma
+    # minutos del presupuesto total del escaneo mientras Nuclei reintenta
+    # plantilla por plantilla contra el mismo host caído.
+    nuclei_request_timeout_seconds: int = 5
+    # Reintentos por plantilla fallida (flag -retries, default de Nuclei: 1).
+    # En 0 se evita duplicar el tiempo gastado contra objetivos que no
+    # responden — la primera falla ya es suficiente señal.
+    nuclei_retries: int = 0
+    # Tags excluidos del catálogo (flag -etags). "dos" cubre plantillas que
+    # intencionalmente envían payloads pesados/repetidos para verificar
+    # condiciones de denegación de servicio — no corresponden en una
+    # auditoría automatizada y además son las más lentas del catálogo.
+    nuclei_exclude_tags: list[str] = ["dos"]
 
     # Cola de trabajos (HU-004)
     max_concurrent_scans: int = 10
@@ -59,6 +78,14 @@ class Settings(BaseSettings):
 
     # Marcado manual de falsos positivos (HU-022)
     false_positive_store_path: str = "data/false_positives.jsonl"
+
+    # Solicitudes de acceso desde la landing page pre-login. Sin envío de
+    # correo (no hay SMTP configurado en el proyecto): el administrador las
+    # revisa vía GET /api/access-requests.
+    access_request_store_path: str = "data/access_requests.jsonl"
+
+    # Cuentas de usuario creadas al aprobar una solicitud de acceso
+    account_store_path: str = "data/accounts.jsonl"
 
     # Validación estructurada de respuestas IA (HU-017 / ADR-002)
     llm_validation_max_retries: int = 1

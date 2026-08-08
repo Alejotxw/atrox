@@ -107,6 +107,10 @@ class NucleiWrapper:
         on_command: OnCommand | None = None,
         docker_image: str | None = None,
         docker_templates_volume: str | None = "atrox-nuclei-templates",
+        concurrency: int | None = None,
+        request_timeout_seconds: int | None = None,
+        retries: int | None = None,
+        exclude_tags: list[str] | None = None,
     ) -> None:
         self.nuclei_path = nuclei_path
         self.timeout_seconds = timeout_seconds
@@ -116,6 +120,11 @@ class NucleiWrapper:
         self._docker_image = docker_image
         self._docker_templates_volume = docker_templates_volume
         self._docker_container_name: str | None = None
+        # None = usar el default propio de Nuclei (no se agrega el flag).
+        self._concurrency = concurrency
+        self._request_timeout_seconds = request_timeout_seconds
+        self._retries = retries
+        self._exclude_tags = exclude_tags
 
     def _base_command(self) -> list[str]:
         """Comando base antes de los flags de Nuclei.
@@ -169,6 +178,18 @@ class NucleiWrapper:
 
         if tags:
             args.extend(["-tags", ",".join(tags)])
+
+        if self._concurrency is not None:
+            args.extend(["-c", str(self._concurrency)])
+
+        if self._request_timeout_seconds is not None:
+            args.extend(["-timeout", str(self._request_timeout_seconds)])
+
+        if self._retries is not None:
+            args.extend(["-retries", str(self._retries)])
+
+        if self._exclude_tags:
+            args.extend(["-etags", ",".join(self._exclude_tags)])
 
         if self._on_command is not None:
             await self._on_command([*self._base_command(), *args])

@@ -7,6 +7,10 @@ from pathlib import Path
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from atrox.access_requests.store import AccessRequestStore
+from atrox.accounts.store import AccountStore
+from atrox.api.access_requests import router as access_requests_router
+from atrox.api.accounts import router as accounts_router
 from atrox.api.audit import router as audit_router
 from atrox.api.auth import router as auth_router
 from atrox.api.chat import router as chat_router
@@ -104,6 +108,10 @@ async def _dispatch_scan(job: Job) -> dict:
         on_command=lambda args: _emit_command("NUCLEI", job.id, args),
         docker_image=settings.nuclei_docker_image,
         docker_templates_volume=settings.nuclei_docker_templates_volume,
+        concurrency=settings.nuclei_concurrency,
+        request_timeout_seconds=settings.nuclei_request_timeout_seconds,
+        retries=settings.nuclei_retries,
+        exclude_tags=settings.nuclei_exclude_tags,
     )
     severity_param = job.params.get("severity") or job.params.get("severities")
     if isinstance(severity_param, str):
@@ -212,6 +220,19 @@ async def lifespan(app: FastAPI):
         encryptor=fp_encryptor,
     )
 
+    # Solicitudes de acceso desde la landing page (mismo encryptor que arriba)
+    app.state.access_request_store = AccessRequestStore(
+        store_path=Path(settings.access_request_store_path),
+        encryptor=fp_encryptor,
+    )
+
+    # Cuentas de usuario creadas al aprobar una solicitud (mismo encryptor que arriba)
+    app.state.account_store = AccountStore(
+        store_path=Path(settings.account_store_path),
+        encryptor=fp_encryptor,
+        reserved_usernames=frozenset({settings.admin_username}),
+    )
+
     # Sincronización diaria NVD (HU-005 / RF-010): el scheduler duerme
     # primero, así el arranque no hace llamadas de red; la primera
     # sincronización se dispara manualmente (POST /api/threats/sync o CLI).
@@ -257,6 +278,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(health_router)
+    application.include_router(access_requests_router)
+    application.include_router(accounts_router)
     application.include_router(auth_router)
     application.include_router(discovery_router)
     application.include_router(vulnscan_router)

@@ -15,6 +15,8 @@ SENSITIVE_FIELDS: dict[str, frozenset[str]] = {
         "poc_evidence",
         "remediation_steps",
     }),
+    "access_request": frozenset({"full_name", "email", "organization", "role", "reason"}),
+    "account": frozenset({"full_name", "email", "organization", "role"}),
 }
 
 

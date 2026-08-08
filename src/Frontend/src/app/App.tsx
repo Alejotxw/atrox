@@ -31,10 +31,13 @@ import {
   UserCheck,
   RefreshCw,
   Menu,
-  X
+  X,
+  Users
 } from 'lucide-react';
 import FindingsManagementView from './components/findings/FindingsManagementView';
 import LoginForm from './components/auth/LoginForm';
+import LandingPage from './components/landing/LandingPage';
+import AdminPanel from './components/admin/AdminPanel';
 import ScanConsole from './components/ScanConsole/ScanConsole';
 import {
   createScan,
@@ -120,7 +123,10 @@ function describeThreatLevel(vectors: AttackVector[]): { label: string; classNam
 export default function App() {
   // --- ESTADOS INTERACTIVOS ---
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!getAuthToken());
+  const [showLogin, setShowLogin] = useState<boolean>(false);
   const [authenticatedUser, setAuthenticatedUser] = useState<string>('sysadmin');
+  const [userRole, setUserRole] = useState<string>('SysAdmin');
+  const isSuperAdmin = userRole === 'SysAdmin';
   const [sessionRemaining, setSessionRemaining] = useState<number | null>(null);
 
   const [activeTab, setActiveTab] = useState('Dashboard');
@@ -163,15 +169,29 @@ export default function App() {
       try {
         const res = await getMeApi();
         setAuthenticatedUser(res.username);
+        setUserRole(res.role);
         setSessionRemaining(res.seconds_remaining);
         setIsAuthenticated(true);
       } catch {
         setAuthToken(null);
         setIsAuthenticated(false);
+        // Había una sesión previa (token expirado/inválido) — ir directo al
+        // login en vez de la landing, igual que el comportamiento anterior.
+        setShowLogin(true);
       }
     };
     checkSession();
   }, []);
+
+  // Si una sesión de cuenta regular hereda 'Administración' como pestaña activa
+  // (ej. tras cerrar sesión del sysadmin sin cambiar de pestaña primero), la
+  // redirige a Dashboard — el backend ya bloquea el acceso, esto solo evita
+  // un panel de contenido en blanco para el usuario regular.
+  useEffect(() => {
+    if (!isSuperAdmin && activeTab === 'Administración') {
+      setActiveTab('Dashboard');
+    }
+  }, [isSuperAdmin, activeTab]);
 
   const handleLogout = async () => {
     try {
@@ -397,7 +417,15 @@ export default function App() {
   };
 
   if (!isAuthenticated) {
-    return <LoginForm onSuccess={(user) => { setAuthenticatedUser(user); setIsAuthenticated(true); }} />;
+    if (!showLogin) {
+      return <LandingPage onRequestLogin={() => setShowLogin(true)} />;
+    }
+    return (
+      <LoginForm
+        onSuccess={(user, role) => { setAuthenticatedUser(user); setUserRole(role); setIsAuthenticated(true); }}
+        onBack={() => setShowLogin(false)}
+      />
+    );
   }
 
   return (
@@ -445,11 +473,14 @@ export default function App() {
           <nav className="space-y-1.5">
             <NavItem icon={<Radar />} label="Dashboard" active={activeTab === 'Dashboard'} onClick={() => selectTab('Dashboard')} />
             <NavItem icon={<Network />} label="Reconocimiento (Nmap)" active={activeTab === 'Reconocimiento (Nmap)'} onClick={() => selectTab('Reconocimiento (Nmap)')} />
-            <NavItem icon={<ScanLine />} label="Escaneo (Nuclei/SQLMap)" active={activeTab === 'Escaneo (Nuclei/SQLMap)'} onClick={() => selectTab('Escaneo (Nuclei/SQLMap)')} />
+            <NavItem icon={<ScanLine />} label="Escaneo (Nuclei)" active={activeTab === 'Escaneo (Nuclei)'} onClick={() => selectTab('Escaneo (Nuclei)')} />
             <NavItem icon={<ShieldCheck />} label="Validación (Metasploit)" active={activeTab === 'Validación (Metasploit)'} onClick={() => selectTab('Validación (Metasploit)')} />
             <NavItem icon={<ListFilter />} label="Gestión de Hallazgos" active={activeTab === 'Gestión de Hallazgos'} onClick={() => selectTab('Gestión de Hallazgos')} />
             <NavItem icon={<Cpu />} label="Motor Ollama IA" badge="Llama 3" active={activeTab === 'Motor Ollama IA'} onClick={() => selectTab('Motor Ollama IA')} />
             <NavItem icon={<History />} label="Historial de Trabajos" active={activeTab === 'Historial de Trabajos'} onClick={() => selectTab('Historial de Trabajos')} />
+            {isSuperAdmin && (
+              <NavItem icon={<Users />} label="Administración" active={activeTab === 'Administración'} onClick={() => selectTab('Administración')} />
+            )}
           </nav>
         </div>
 
@@ -463,13 +494,13 @@ export default function App() {
                 <p className="text-xs font-semibold text-white tracking-wide truncate">{authenticatedUser}</p>
                 <p className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  MFA Activo (Root)
+                  Sesión activa
                 </p>
               </div>
             </div>
             <button
               onClick={handleLogout}
-              title="Cerrar Sesión MFA"
+              title="Cerrar sesión"
               className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all border border-transparent hover:border-red-500/20 shrink-0"
             >
               <LogOut className="w-4 h-4" />
@@ -799,14 +830,15 @@ export default function App() {
             {activeTab === 'Reconocimiento (Nmap)' && (
               <ReconView targetUrl={targetUrl} assets={discoveryAssets} isAuditing={isAuditing} />
             )}
-            {activeTab === 'Escaneo (Nuclei/SQLMap)' && (
+            {activeTab === 'Escaneo (Nuclei)' && (
               <ScanView targetUrl={targetUrl} findings={findings} isAuditing={isAuditing} reportStatus={reportStatus} />
             )}
             {activeTab === 'Validación (Metasploit)' && <MetasploitView targetUrl={targetUrl} />}
             {activeTab === 'Gestión de Hallazgos' && <FindingsManagementView />}
             {activeTab === 'Motor Ollama IA' && <OllamaView findings={findings} targetUrl={targetUrl} />}
             {activeTab === 'Historial de Trabajos' && <HistoryView />}
-            
+            {activeTab === 'Administración' && isSuperAdmin && <AdminPanel />}
+
           </div>
         </div>
       </div>
@@ -1075,14 +1107,6 @@ const ScanView = ({
             Aún no hay resultados de Nuclei en esta sesión — ejecuta "Iniciar Auditoría Automatizada".
           </p>
         )}
-      </div>
-
-      <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-start gap-3">
-        <Info className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
-        <p className="text-xs text-amber-200">
-          <span className="font-semibold">SQLMap: no implementado.</span> Este backend no tiene integración real con SQLMap —
-          esta pestaña solo muestra resultados reales de Nuclei.
-        </p>
       </div>
     </div>
   );

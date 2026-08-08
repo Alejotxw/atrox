@@ -21,6 +21,20 @@ REQUIRED_JSONL_FIELDS = ("template-id", "host", "matched-at")
 REQUIRED_INFO_FIELDS = ("name", "severity")
 
 
+class NucleiTimeoutError(Exception):
+    """Timeout de Nuclei con stdout/stderr parciales (si hubo).
+
+    No hereda de TimeoutError: en Python 3.10+ `asyncio.TimeoutError` es
+    alias de TimeoutError y un `except asyncio.TimeoutError` se comería esta
+    excepción y perdería el stdout parcial.
+    """
+
+    def __init__(self, message: str, *, stdout: str = "", stderr: str = "") -> None:
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+
+
 def parse_nuclei_jsonl(output: str) -> list[VulnFinding]:
     """Parsea la salida JSONL de Nuclei y retorna lista de hallazgos.
 
@@ -107,6 +121,13 @@ class NucleiWrapper:
         on_command: OnCommand | None = None,
         docker_image: str | None = None,
         docker_templates_volume: str | None = "atrox-nuclei-templates",
+        concurrency: int = 80,
+        rate_limit: int = 200,
+        request_timeout: int = 3,
+        retries: int = 0,
+        max_host_error: int = 8,
+        exclude_tags: list[str] | None = None,
+        accept_partial_on_timeout: bool = True,
     ) -> None:
         self.nuclei_path = nuclei_path
         self.timeout_seconds = timeout_seconds
@@ -116,6 +137,15 @@ class NucleiWrapper:
         self._docker_image = docker_image
         self._docker_templates_volume = docker_templates_volume
         self._docker_container_name: str | None = None
+        self.concurrency = concurrency
+        self.rate_limit = rate_limit
+        self.request_timeout = request_timeout
+        self.retries = retries
+        self.max_host_error = max_host_error
+        self.exclude_tags = (
+            exclude_tags if exclude_tags is not None else ["dos", "fuzz", "intrusive"]
+        )
+        self.accept_partial_on_timeout = accept_partial_on_timeout
 
     def _base_command(self) -> list[str]:
         """Comando base antes de los flags de Nuclei.
@@ -142,15 +172,36 @@ class NucleiWrapper:
         command.append(self._docker_image)
         return command
 
+    def _speed_args(self) -> list[str]:
+        """Flags de rendimiento para terminar dentro del timeout del job."""
+        args = [
+            "-c",
+            str(self.concurrency),
+            "-rl",
+            str(self.rate_limit),
+            "-timeout",
+            str(self.request_timeout),
+            "-retries",
+            str(self.retries),
+            "-mhe",
+            str(self.max_host_error),
+            "-ni",  # sin Interactsh (OOB) — evita esperas largas en demos
+            "-duc",  # no chequear updates al arrancar
+        ]
+        if self.exclude_tags:
+            args.extend(["-etags", ",".join(self.exclude_tags)])
+        return args
+
     async def scan(
         self,
         target: str,
         templates: list[str] | None = None,
         severities: list[str] | None = None,
         tags: list[str] | None = None,
+        protocols: list[str] | None = None,
     ) -> VulnScanResult:
         self._docker_container_name = None
-        args = ["-u", target, "-jsonl", "-silent", "-nc", "-or"]
+        args = ["-u", target, "-jsonl", "-silent", "-nc", "-or", *self._speed_args()]
 
         if templates and self.sandbox_templates:
             try:
@@ -170,6 +221,9 @@ class NucleiWrapper:
         if tags:
             args.extend(["-tags", ",".join(tags)])
 
+        if protocols:
+            args.extend(["-type", ",".join(protocols)])
+
         if self._on_command is not None:
             await self._on_command([*self._base_command(), *args])
 
@@ -183,6 +237,30 @@ class NucleiWrapper:
                 else "Nuclei no encontrado. Instale Nuclei o configure ATROX_NUCLEI_PATH."
             )
             return VulnScanResult(target=target, status=ScanStatus.ERROR, error=error)
+        except NucleiTimeoutError as exc:
+            findings = self._parse_jsonl(exc.stdout)
+            if self.accept_partial_on_timeout:
+                # La auditoría no debe fallar: devolvemos completed (con o sin hallazgos).
+                logger.warning(
+                    "Timeout escaneando %s — completed con %s hallazgos parciales",
+                    target,
+                    len(findings),
+                )
+                return VulnScanResult(
+                    target=target,
+                    status=ScanStatus.COMPLETED,
+                    findings=findings,
+                    error=(
+                        f"Escaneo truncado a {self.timeout_seconds}s; "
+                        f"{len(findings)} hallazgos parciales conservados"
+                    ),
+                )
+            logger.warning("Timeout escaneando %s sin accept_partial", target)
+            return VulnScanResult(
+                target=target,
+                status=ScanStatus.TIMEOUT,
+                error=f"El escaneo excedio el tiempo limite de {self.timeout_seconds}s",
+            )
         except (asyncio.TimeoutError, TimeoutError):
             logger.warning("Timeout escaneando %s", target)
             return VulnScanResult(
@@ -216,10 +294,15 @@ class NucleiWrapper:
 
     async def _execute(self, args: list[str]) -> tuple[int, str, str]:
         if self._runner is not None:
-            return await asyncio.wait_for(
-                self._runner(args),
-                timeout=self.timeout_seconds,
-            )
+            try:
+                return await asyncio.wait_for(
+                    self._runner(args),
+                    timeout=self.timeout_seconds,
+                )
+            except asyncio.TimeoutError as exc:
+                raise NucleiTimeoutError(
+                    f"El escaneo excedio el tiempo limite de {self.timeout_seconds}s"
+                ) from exc
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._run_subprocess_blocking, args)
@@ -241,13 +324,17 @@ class NucleiWrapper:
         )
         try:
             stdout_bytes, stderr_bytes = process.communicate(timeout=self.timeout_seconds)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             process.kill()
-            process.communicate()
+            out_rest, err_rest = process.communicate()
             if self._docker_image and self._docker_container_name:
                 self._kill_docker_container(self._docker_container_name)
-            raise TimeoutError(
-                f"El escaneo excedio el tiempo limite de {self.timeout_seconds}s"
+            stdout = ((exc.stdout or b"") + (out_rest or b"")).decode(errors="replace")
+            stderr = ((exc.stderr or b"") + (err_rest or b"")).decode(errors="replace")
+            raise NucleiTimeoutError(
+                f"El escaneo excedio el tiempo limite de {self.timeout_seconds}s",
+                stdout=stdout,
+                stderr=stderr,
             ) from None
 
         return (

@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,12 +25,11 @@ class Settings(BaseSettings):
     # ej. ATROX_CORS_ORIGINS='["http://localhost:5173","http://otro:4000"]'.
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     nmap_path: str = "nmap"
-    nmap_timeout_seconds: int = 300
+    # Host-timeout Nmap (puertos web por defecto — no barrer 1-1024).
+    nmap_timeout_seconds: int = 60
     nuclei_path: str = "nuclei"
-    # 480s (8min) da margen para la primera corrida antes de que el volumen
-    # de plantillas esté "caliente" — con el volumen ya poblado, escaneos
-    # posteriores terminan en una fracción de este tiempo.
-    nuclei_timeout_seconds: int = 480
+    # Tope del vulnscan; con accept_partial el job NO falla al truncar.
+    nuclei_timeout_seconds: int = 300
     nuclei_sandbox_templates: str | None = None
     # Si se define, Nuclei corre vía `docker run --rm -i <imagen>` en vez del
     # binario nativo (ej. "projectdiscovery/nuclei:latest") — útil cuando un
@@ -39,6 +39,27 @@ class Settings(BaseSettings):
     # modo Docker — sin esto, cada contenedor `--rm` re-descarga el catálogo
     # completo (varios minutos) en cada escaneo. None desactiva el montaje.
     nuclei_docker_templates_volume: str | None = "atrox-nuclei-templates"
+    # Rendimiento Nuclei
+    nuclei_concurrency: int = 80
+    nuclei_rate_limit: int = 200
+    nuclei_request_timeout: int = 3
+    nuclei_retries: int = 0
+    nuclei_max_host_error: int = 8
+    nuclei_exclude_tags: list[str] = ["dos", "fuzz", "intrusive"]
+    nuclei_accept_partial_on_timeout: bool = True
+    # Protocolos por defecto si el job no especifica type/protocols.
+    nuclei_default_protocols: list[str] = ["http"]
+    # Puertos por defecto del discovery si el job no envía port_range.
+    nmap_default_port_range: str = "80,443,8080,8443"
+
+    @field_validator("nmap_path", "nuclei_path", mode="before")
+    @classmethod
+    def _clean_tool_path(cls, value: object) -> object:
+        """Quita comillas/espacios que rompen rutas de Windows en .env."""
+        if not isinstance(value, str):
+            return value
+        cleaned = value.strip().strip('"').strip("'").strip()
+        return cleaned or value
 
     # Cola de trabajos (HU-004)
     max_concurrent_scans: int = 10

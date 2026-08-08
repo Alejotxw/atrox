@@ -25,6 +25,7 @@ from atrox.queue.service import JobQueue
 from atrox.reports.generator import ExecutiveReportGenerator
 from atrox.reports.models import ExecutiveReportData, SeverityHeatmap, TechnicalFindingItem, TechnicalReportData, TopRiskItem
 from atrox.reports.technical_generator import TechnicalReportGenerator
+from atrox.scanner.audit_outcome import resolve_vulnscan_findings
 from atrox.scanner.models import VulnFinding
 from atrox.security.auth_deps import require_mfa_admin
 
@@ -165,11 +166,7 @@ async def export_executive_report_pdf(
         )
 
     target = job.params.get("target", "Objetivo No Especificado")
-    raw_findings = []
-    if job.result and isinstance(job.result, dict):
-        raw_findings = job.result.get("findings", [])
-
-    findings = [VulnFinding(**f) if isinstance(f, dict) else f for f in raw_findings]
+    findings = resolve_vulnscan_findings(job, queue)
 
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     top_items: list[TopRiskItem] = []
@@ -310,11 +307,7 @@ async def export_technical_report(
         )
 
     target = job.params.get("target", "Objetivo No Especificado")
-    raw_findings = []
-    if job.result and isinstance(job.result, dict):
-        raw_findings = job.result.get("findings", [])
-
-    findings = [VulnFinding(**f) if isinstance(f, dict) else f for f in raw_findings]
+    findings = resolve_vulnscan_findings(job, queue)
     tech_findings = [_generate_technical_finding_details(f, idx + 1) for idx, f in enumerate(findings)]
 
     report_data = TechnicalReportData(

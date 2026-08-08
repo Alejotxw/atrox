@@ -280,8 +280,10 @@ export default function App() {
         return;
       }
 
-      // Paso 1: Discovery (Nmap)
-      const discoveryScan = await createScan(target, 'discovery');
+      // Paso 1: Discovery rápido (puertos web; 1-1024 tarda varios minutos)
+      const discoveryScan = await createScan(target, 'discovery', {
+        port_range: '80,443,8080,8443',
+      });
       if (!isCurrent()) return;
 
       const discoveryDetail = await pollScanUntilDone(discoveryScan.scan_id, isCurrent);
@@ -298,61 +300,103 @@ export default function App() {
       // Los KPIs de hosts/puertos se reflejan solos vía el polling real (HU-019) al terminar el job.
       loadKpis(true);
 
-      // Paso 2: Vulnscan (Nuclei) — solo severidades accionables por defecto
-      // (omite "info"/"low", que son ruido de descubrimiento) para que la
-      // auditoría automática corra en una fracción del tiempo.
-      const vulnScan = await createScan(target, 'vulnscan', { severity: 'critical,high,medium' });
+      // Paso 2: Nuclei — mismos hallazgos que verán los reportes PDF/HTML (job result).
+      const vulnScan = await createScan(target, 'vulnscan', {
+        severity: 'critical,high,medium',
+        type: 'http',
+      });
       if (!isCurrent()) return;
-      setLastScanId(String(vulnScan.scan_id));
+      const vulnScanId = String(vulnScan.scan_id);
+      setLastScanId(vulnScanId);
 
-      const vulnDetail = await pollScanUntilDone(vulnScan.scan_id, isCurrent, { pageSize: 100 });
-      if (!isCurrent() || !vulnDetail) return;
+      await pollScanUntilDone(vulnScanId, isCurrent, { pageSize: 100 });
+      if (!isCurrent()) return;
 
-      if (vulnDetail.status === 'failed') {
-        // No bloquear toda la auditoría por esto: el reconocimiento (Nmap) ya
-        // completó y sigue siendo información válida. Se avisa sin alert().
+      // Releer el MISMO scan_id que usan los reportes (fuente única: CVEs o resultado informativo).
+      const vulnDetail = await getScanDetail(vulnScanId, { pageSize: 100 });
+      if (!isCurrent()) return;
+
+      const rawNuclei =
+        vulnDetail.status === 'failed' && !vulnDetail.findings.items.length
+          ? []
+          : vulnDetail.findings.items;
+      // Backend enriquece con superficie Nmap / resultado negativo si Nuclei vino vacío.
+      const items = rawNuclei;
+
+      const hasCves = items.some(
+        (f) => !f.template_id.startsWith('audit:') && !f.template_id.startsWith('recon:'),
+      );
+
+      if (vulnDetail.status === 'failed' && !hasCves) {
         setAuditWarning(
-          `Escaneo de vulnerabilidades omitido: ${vulnDetail.error ?? 'error desconocido'}`,
+          `Nuclei no completó (${vulnDetail.error ?? 'error'}). Se muestran hallazgos informativos del mismo escaneo (alineados con los reportes).`,
         );
-        setAttackVectors([]);
-        setShowInsights(true);
-        setReportStatus('Completado (solo reconocimiento)');
-        loadKpis(true);
-        return;
+      } else if (vulnDetail.error && !hasCves) {
+        setAuditWarning(
+          `Nuclei parcial: ${vulnDetail.error}. Impacto/Trazabilidad/Reportes usan el resultado persistido del escaneo ${vulnScanId}.`,
+        );
+      } else if (!hasCves) {
+        setAuditWarning(
+          `Escaneo ${vulnScanId} sin CVEs Nuclei. Impacto y Trazabilidad muestran el resultado real (recon/negativo); los reportes PDF/HTML usan la misma fuente.`,
+        );
       }
 
-      const items = vulnDetail.findings.items;
-      setFindings(items.map(f => ({
-        id: f.template_id,
-        name: f.name,
-        vector: f.matched_at || f.host,
-        severity: mapSeverity(f.severity),
-        status: 'unchecked' as const,
-      })));
+      setFindings(
+        items.map((f) => ({
+          id: f.template_id,
+          name: f.name,
+          vector: f.matched_at || f.host,
+          severity: mapSeverity(f.severity),
+          status: (f.severity === 'info' ? 'na' : 'unchecked') as FindingStatus,
+        })),
+      );
 
-      // Paso 3: Análisis de vectores (IA). Solo top hallazgos por severidad
-      // para no saturar Ollama; si falla, la auditoría NO se corta.
+      // Paso 3: vectores sobre la misma lista que Trazabilidad/Reportes.
       if (items.length > 0) {
         try {
           const analysis = await analyzeVectors(prioritizeFindingsForAi(items));
           if (!isCurrent()) return;
           setAttackVectors(analysis.vectors);
           setVectorAnalysisMeta({ source: analysis.source, model_used: analysis.model_used });
-          if (analysis.source === 'heuristic') {
+          if (analysis.source === 'heuristic' && hasCves) {
             setAuditWarning(
               (prev) =>
                 prev ??
-                'Análisis IA no disponible o lento: se usó correlación heurística (auditoría completa).',
+                'Correlación de impacto heurística sobre los hallazgos reales de este escaneo.',
             );
           }
         } catch {
           if (!isCurrent()) return;
-          setAttackVectors([]);
-          setVectorAnalysisMeta(null);
+          // Fallback local: un vector por hallazgo para que Impacto nunca quede vacío.
+          setAttackVectors(
+            items.slice(0, 8).map((f, idx) => ({
+              rank: idx + 1,
+              vector_id: `local:${f.template_id}`,
+              name: f.name,
+              severity_score:
+                f.severity === 'critical'
+                  ? 10
+                  : f.severity === 'high'
+                    ? 7.5
+                    : f.severity === 'medium'
+                      ? 5
+                      : f.severity === 'low'
+                        ? 2.5
+                        : 1,
+              finding_ids: [f.template_id],
+              chain: [f.matched_at || f.host, f.name],
+              justification: f.description || `Resultado del escaneo ${vulnScanId}.`,
+              estimated_impact:
+                f.severity === 'info'
+                  ? 'Informativo — sin CVE explotable confirmado en esta corrida'
+                  : `Proporcional a severidad ${f.severity}`,
+            })),
+          );
+          setVectorAnalysisMeta({ source: 'heuristic', model_used: null });
           setAuditWarning(
             (prev) =>
               prev ??
-              'Análisis de vectores omitido por error temporal; el resto de la auditoría se completó.',
+              'Correlación por API no disponible; impacto generado localmente desde los hallazgos del escaneo.',
           );
         }
       } else {
@@ -362,7 +406,7 @@ export default function App() {
 
       if (!isCurrent()) return;
       setShowInsights(true);
-      setReportStatus('Completado');
+      setReportStatus(hasCves ? 'Completado' : 'Completado (resultado informativo)');
       loadKpis(true);
     } catch (err) {
       if (!isCurrent()) return;
@@ -723,7 +767,11 @@ export default function App() {
                           {attackVectors.length === 0 ? (
                             <div className="flex items-start gap-3 bg-slate-800/40 border border-slate-700/50 rounded-lg p-4">
                               <Info className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-                              <p className="text-[13px] text-slate-400 leading-relaxed">No se correlacionaron vectores de ataque a partir de los hallazgos de este escaneo.</p>
+                              <p className="text-[13px] text-slate-400 leading-relaxed">
+                                Esperando correlación de impacto para este escaneo
+                                {lastScanId ? ` (${lastScanId.slice(0, 8)}…)` : ''}.
+                                Vuelve a ejecutar la auditoría si el panel sigue vacío.
+                              </p>
                             </div>
                           ) : (
                             <>
@@ -771,14 +819,18 @@ export default function App() {
                       Trazabilidad de Hallazgos
                     </h3>
                     <span className="text-xs text-slate-400 font-medium px-3 py-1 bg-slate-800 rounded-full border border-slate-700">
-                      Mostrando {findings.length} vulnerabilidad{findings.length !== 1 ? 'es' : ''}
+                      {lastScanId
+                        ? `${findings.length} hallazgo(s) · scan ${lastScanId.slice(0, 8)}…`
+                        : `Mostrando ${findings.length} vulnerabilidad${findings.length !== 1 ? 'es' : ''}`}
                     </span>
                   </div>
                   <div className="overflow-x-auto min-h-[150px]">
                     {findings.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                      <div className="flex flex-col items-center justify-center py-12 text-slate-500 px-6 text-center">
                         <History className="w-8 h-8 mb-3 opacity-50" />
-                        <p className="text-sm">Aún no se han registrado hallazgos en la sesión actual.</p>
+                        <p className="text-sm">
+                          Aún no hay hallazgos de esta sesión. Ejecuta una auditoría para llenar Trazabilidad e Impacto.
+                        </p>
                       </div>
                     ) : (
                       <table className="w-full text-left text-sm animate-in fade-in duration-500">

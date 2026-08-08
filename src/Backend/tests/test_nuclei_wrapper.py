@@ -348,11 +348,54 @@ class TestNucleiWrapperErrorHandling:
             await asyncio.sleep(2)
             return 0, "", ""
 
-        wrapper = NucleiWrapper(timeout_seconds=1, runner=slow_runner)
+        # Sin accept_partial: sigue siendo TIMEOUT (comportamiento estricto).
+        wrapper = NucleiWrapper(
+            timeout_seconds=1,
+            runner=slow_runner,
+            accept_partial_on_timeout=False,
+        )
         result = asyncio.run(wrapper.scan("192.168.1.10"))
 
         assert result.status == ScanStatus.TIMEOUT
         assert "tiempo límite" in (result.error or "").lower() or "1s" in (result.error or "")
+
+    def test_timeout_without_findings_still_completes_when_partial_enabled(self) -> None:
+        async def slow_runner(_args: list[str]) -> tuple[int, str, str]:
+            await asyncio.sleep(2)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(
+            timeout_seconds=1,
+            runner=slow_runner,
+            accept_partial_on_timeout=True,
+        )
+        result = asyncio.run(wrapper.scan("192.168.1.10"))
+
+        assert result.status == ScanStatus.COMPLETED
+        assert result.findings == []
+        assert "truncado" in (result.error or "").lower()
+
+    def test_timeout_with_partial_findings_returns_completed(self) -> None:
+        from atrox.scanner.nuclei_wrapper import NucleiTimeoutError
+
+        partial = (
+            '{"template-id":"cve-x","info":{"name":"X","severity":"high"},'
+            '"host":"http://t","matched-at":"http://t/"}\n'
+        )
+
+        async def partial_timeout_runner(_args: list[str]) -> tuple[int, str, str]:
+            raise NucleiTimeoutError("timeout", stdout=partial, stderr="")
+
+        wrapper = NucleiWrapper(
+            timeout_seconds=1,
+            runner=partial_timeout_runner,
+            accept_partial_on_timeout=True,
+        )
+        result = asyncio.run(wrapper.scan("192.168.1.10"))
+
+        assert result.status == ScanStatus.COMPLETED
+        assert len(result.findings) == 1
+        assert "parciales" in (result.error or "").lower()
 
     def test_scan_handles_empty_stdout_nonzero_exit(self) -> None:
         async def error_runner(_args: list[str]) -> tuple[int, str, str]:
@@ -396,6 +439,30 @@ class TestNucleiWrapperCLIArgs:
         assert "-silent" in args
         assert "-nc" in args
         assert "-or" in args
+        assert "-c" in args
+        assert args[args.index("-c") + 1] == "80"
+        assert "-rl" in args
+        assert "-timeout" in args
+        assert "-retries" in args
+        assert "-mhe" in args
+        assert "-ni" in args
+        assert "-duc" in args
+        assert "-etags" in args
+        assert "dos,fuzz,intrusive" in args[args.index("-etags") + 1]
+
+    def test_scan_includes_protocols_flag(self) -> None:
+        captured_args: list[list[str]] = []
+
+        async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
+            captured_args.append(args)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(runner=capturing_runner)
+        asyncio.run(wrapper.scan("example.com", protocols=["http"]))
+
+        args = captured_args[0]
+        assert "-type" in args
+        assert args[args.index("-type") + 1] == "http"
 
 
 class TestRealSubprocessPath:
@@ -422,9 +489,11 @@ class TestRealSubprocessPath:
             asyncio.run(wrapper._execute(["--version"]))
 
     def test_execute_raises_timeout_error_when_process_hangs(self) -> None:
+        from atrox.scanner.nuclei_wrapper import NucleiTimeoutError
+
         wrapper = NucleiWrapper(nuclei_path=sys.executable, timeout_seconds=1)
 
-        with pytest.raises(asyncio.TimeoutError):
+        with pytest.raises(NucleiTimeoutError):
             asyncio.run(
                 wrapper._execute(["-c", "import time; time.sleep(5)"])
             )
@@ -552,7 +621,9 @@ class TestDockerMode:
 
         wrapper = NucleiWrapper(docker_image="projectdiscovery/nuclei:latest", timeout_seconds=1)
 
-        with pytest.raises(TimeoutError):
+        from atrox.scanner.nuclei_wrapper import NucleiTimeoutError
+
+        with pytest.raises(NucleiTimeoutError):
             wrapper._run_subprocess_blocking(["-u", "192.168.1.10"])
 
         assert len(killed) == 1

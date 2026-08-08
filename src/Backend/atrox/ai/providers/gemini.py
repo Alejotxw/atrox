@@ -33,7 +33,7 @@ class GeminiProvider:
         api_key: str,
         model: str = "gemini-2.0-flash",
         base_url: str = GEMINI_BASE_URL,
-        timeout_seconds: int = 30,
+        timeout_seconds: int = 180,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.api_key = api_key
@@ -66,7 +66,13 @@ class GeminiProvider:
     async def _post_and_read_text(self, url: str, headers: dict[str, str], payload: dict) -> str:
         client = self._http_client
         if client is None:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as owned:
+            timeout = httpx.Timeout(
+                connect=10.0,
+                read=float(self.timeout_seconds),
+                write=30.0,
+                pool=10.0,
+            )
+            async with httpx.AsyncClient(timeout=timeout) as owned:
                 return await self._request(owned, url, headers, payload)
         return await self._request(client, url, headers, payload)
 

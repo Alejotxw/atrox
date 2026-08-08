@@ -8,6 +8,7 @@ import {
   filterRows,
   findingId,
   matchVectorForFinding,
+  prioritizeFindingsForAi,
 } from './findingsView';
 
 function makeFinding(overrides: Partial<VulnFinding> = {}): VulnFinding {
@@ -66,6 +67,20 @@ describe('chunk', () => {
 
   it('returns an empty array for empty input', () => {
     expect(chunk([], 10)).toEqual([]);
+  });
+});
+
+describe('prioritizeFindingsForAi', () => {
+  it('orders by severity and respects limit', () => {
+    const items = [
+      makeFinding({ template_id: 'low', severity: 'low' }),
+      makeFinding({ template_id: 'crit', severity: 'critical' }),
+      makeFinding({ template_id: 'info', severity: 'info' }),
+    ];
+    expect(prioritizeFindingsForAi(items, 2).map((f) => f.template_id)).toEqual([
+      'crit',
+      'low',
+    ]);
   });
 });
 

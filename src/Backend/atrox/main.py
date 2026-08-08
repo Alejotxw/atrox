@@ -82,7 +82,7 @@ async def _dispatch_scan(job: Job) -> dict:
         )
         result = await wrapper.scan(
             target=job.params["target"],
-            port_range=job.params.get("port_range", "1-1024"),
+            port_range=job.params.get("port_range", settings.nmap_default_port_range),
         )
         _raise_if_tool_failed(result)
 
@@ -104,6 +104,13 @@ async def _dispatch_scan(job: Job) -> dict:
         on_command=lambda args: _emit_command("NUCLEI", job.id, args),
         docker_image=settings.nuclei_docker_image,
         docker_templates_volume=settings.nuclei_docker_templates_volume,
+        concurrency=settings.nuclei_concurrency,
+        rate_limit=settings.nuclei_rate_limit,
+        request_timeout=settings.nuclei_request_timeout,
+        retries=settings.nuclei_retries,
+        max_host_error=settings.nuclei_max_host_error,
+        exclude_tags=settings.nuclei_exclude_tags,
+        accept_partial_on_timeout=settings.nuclei_accept_partial_on_timeout,
     )
     severity_param = job.params.get("severity") or job.params.get("severities")
     if isinstance(severity_param, str):
@@ -111,11 +118,28 @@ async def _dispatch_scan(job: Job) -> dict:
     else:
         severities = severity_param
 
+    protocols_param = job.params.get("type") or job.params.get("protocols")
+    if isinstance(protocols_param, str):
+        protocols = [p.strip() for p in protocols_param.split(",") if p.strip()]
+    elif isinstance(protocols_param, list):
+        protocols = [str(p).strip() for p in protocols_param if str(p).strip()]
+    else:
+        protocols = list(settings.nuclei_default_protocols)
+
+    tags_param = job.params.get("tags")
+    if isinstance(tags_param, str):
+        tags = [t.strip() for t in tags_param.split(",") if t.strip()]
+    elif isinstance(tags_param, list):
+        tags = [str(t).strip() for t in tags_param if str(t).strip()]
+    else:
+        tags = None
+
     result = await wrapper_nuclei.scan(
         target=job.params["target"],
         templates=job.params.get("templates"),
         severities=severities,
-        tags=job.params.get("tags"),
+        tags=tags,
+        protocols=protocols or None,
     )
     _raise_if_tool_failed(result)
 

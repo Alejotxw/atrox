@@ -127,14 +127,19 @@ export default function FindingsManagementView() {
           return;
         }
 
-        // HU-016 no tiene endpoint batch: un POST por hallazgo de la página actual.
+        // HU-016: scoring heurístico es barato → paralelo OK.
         const scorePromise = Promise.all(findings.map((finding) => scoreFinding(finding)));
-        // HU-014 trunca a VECTORS_BATCH_SIZE por llamada: agrupamos para no perder vectores.
-        const vectorPromise = Promise.all(
-          chunk(findings, VECTORS_BATCH_SIZE).map((batch) => analyzeVectors(batch)),
-        );
+        // HU-014 / LLM: lotes en serie para no saturar Ollama (evita timeouts/cortes).
+        const vectorBatches: Awaited<ReturnType<typeof analyzeVectors>>[] = [];
+        for (const batch of chunk(findings, VECTORS_BATCH_SIZE)) {
+          try {
+            vectorBatches.push(await analyzeVectors(batch));
+          } catch {
+            // Un lote fallido no tumba la vista: seguimos con scores + lo ya obtenido.
+          }
+        }
 
-        const [scoreResults, vectorBatches] = await Promise.all([scorePromise, vectorPromise]);
+        const scoreResults = await scorePromise;
         if (cancelled) return;
 
         setScores(scoreResults);

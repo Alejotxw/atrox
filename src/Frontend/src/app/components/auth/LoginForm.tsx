@@ -67,7 +67,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
       const dataUrl = await QRCode.toDataURL(data.otpauth_url, {
         width: 220,
         margin: 1,
-        color: { dark: '#0B1121', light: '#F1F5F9' },
+        color: { dark: '#1a1820', light: '#F1F5F9' },
       });
       setQrDataUrl(dataUrl);
     } catch (err: any) {
@@ -76,21 +76,17 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#090D16] flex items-center justify-center p-4 relative overflow-hidden font-sans">
-      {/* Background Decorator Gradients */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#7A1C3E]/20 rounded-full blur-3xl pointer-events-none"></div>
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-900/15 rounded-full blur-3xl pointer-events-none"></div>
-
-      <div className="w-full max-w-md bg-[#0F172A]/90 backdrop-blur-xl border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl relative z-10">
+    <div className="min-h-screen bg-[var(--ax-bg)] flex items-center justify-center p-4" style={{ fontFamily: 'var(--font-sans)' }}>
+      <div className="w-full max-w-md bg-[var(--ax-surface)] border border-[var(--ax-border)] rounded-lg p-6 sm:p-8">
         
         {/* Header Branding */}
-        <div className="flex items-center gap-4 mb-8">
-          <div className="w-12 h-12 rounded-xl bg-[#7A1C3E] flex items-center justify-center shadow-lg shadow-[#7A1C3E]/30">
-            <ShieldAlert className="text-white w-7 h-7" />
+        <div className="flex items-center gap-3.5 mb-8">
+          <div className="w-12 h-12 rounded-lg bg-[var(--ax-brand)] flex items-center justify-center">
+            <ShieldAlert className="text-white w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-white font-bold text-xl tracking-tight">ATROX</h1>
-            <p className="text-xs text-[#D4AF37] font-medium tracking-wide">Panel Operativo SysAdmin</p>
+            <h1 className="text-white font-bold text-xl tracking-tight">Atrox</h1>
+            <p className="text-xs text-[var(--ax-accent)] font-medium tracking-wide">UIDE · Acceso SysAdmin</p>
           </div>
         </div>
 
@@ -128,7 +124,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-[#0B1121] border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#7A1C3E] focus:border-transparent transition-all"
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#1a1820] border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-[var(--ax-brand)] focus:border-transparent transition-all"
                   placeholder="sysadmin"
                 />
               </div>
@@ -145,7 +141,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-[#0B1121] border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-[#7A1C3E] focus:border-transparent transition-all"
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#1a1820] border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-[var(--ax-brand)] focus:border-transparent transition-all"
                   placeholder="••••••••••••"
                 />
               </div>
@@ -154,7 +150,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
             <button
               type="submit"
               disabled={loading || !username.trim() || !password.trim()}
-              className="w-full mt-2 bg-[#7A1C3E] hover:bg-[#90244B] text-white py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all shadow-lg shadow-[#7A1C3E]/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full mt-2 bg-[var(--ax-brand)] hover:bg-[var(--ax-brand-hover)] text-white py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Continuar <ArrowRight className="w-4 h-4" /></>}
             </button>
@@ -170,7 +166,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                 <button
                   type="button"
                   onClick={handleFetchSetup}
-                  className="text-xs text-[#D4AF37] hover:underline flex items-center gap-1 font-medium"
+                  className="text-xs text-[var(--ax-accent)] hover:underline flex items-center gap-1 font-medium"
                 >
                   <QrCode className="w-3.5 h-3.5" /> Clave / QR Setup
                 </button>
@@ -182,7 +178,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                 required
                 value={totpCode}
                 onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
-                className="w-full py-3 bg-[#0B1121] border border-slate-700 rounded-xl text-center font-mono text-2xl tracking-[0.5em] text-white focus:outline-none focus:ring-2 focus:ring-[#7A1C3E] focus:border-transparent transition-all"
+                className="w-full py-3 bg-[#1a1820] border border-slate-700 rounded-xl text-center font-mono text-2xl tracking-[0.5em] text-white focus:outline-none focus:ring-2 focus:ring-[var(--ax-brand)] focus:border-transparent transition-all"
                 placeholder="000000"
               />
             </div>
@@ -198,7 +194,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
               <button
                 type="submit"
                 disabled={loading || totpCode.length !== 6}
-                className="w-2/3 bg-[#7A1C3E] hover:bg-[#90244B] text-white py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all shadow-lg shadow-[#7A1C3E]/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-2/3 bg-[var(--ax-brand)] hover:bg-[var(--ax-brand-hover)] text-white py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Verificar y Entrar <ShieldCheck className="w-4 h-4" /></>}
               </button>
@@ -208,9 +204,9 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
 
         {/* Modal con Secreto / Clave TOTP de Prueba para la demostración E2E */}
         {showSetupModal && setupData && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
-            <div className="bg-[#0F172A] border border-slate-700 rounded-2xl p-6 max-w-sm w-full space-y-4 text-center shadow-2xl">
-              <div className="w-12 h-12 rounded-full bg-[#7A1C3E]/20 text-[#D4AF37] mx-auto flex items-center justify-center border border-[#7A1C3E]/40">
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+            <div className="bg-[var(--ax-surface)] border border-[var(--ax-border)] rounded-lg p-6 max-w-sm w-full space-y-4 text-center">
+              <div className="w-12 h-12 rounded-lg bg-[var(--ax-surface-2)] text-[var(--ax-info)] mx-auto flex items-center justify-center border border-[var(--ax-border)]">
                 <QrCode className="w-6 h-6" />
               </div>
               <h3 className="text-white font-bold text-base">Configuración Inicial TOTP</h3>
@@ -226,7 +222,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                     className="rounded-xl border border-slate-700 w-[220px] h-[220px]"
                   />
                 ) : (
-                  <div className="w-[220px] h-[220px] flex items-center justify-center bg-[#0B1121] rounded-xl border border-slate-800">
+                  <div className="w-[220px] h-[220px] flex items-center justify-center bg-[#1a1820] rounded-xl border border-slate-800">
                     <Loader2 className="w-6 h-6 text-slate-500 animate-spin" />
                   </div>
                 )}
@@ -236,7 +232,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                 ¿No puede escanear? Ingrese esta clave manualmente:
               </p>
 
-              <div className="bg-[#0B1121] p-3 rounded-xl border border-slate-800 font-mono text-xs text-[#D4AF37] select-all break-all">
+              <div className="bg-[#1a1820] p-3 rounded-xl border border-slate-800 font-mono text-xs text-[var(--ax-accent)] select-all break-all">
                 {setupData.secret}
               </div>
 

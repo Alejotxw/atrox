@@ -23,23 +23,23 @@ export function formatLogTime(iso: string): string {
 
 export function moduleColorClass(module: string): string {
   const key = module.toUpperCase();
-  if (key === 'NMAP') return 'text-purple-400';
-  if (key === 'NUCLEI') return 'text-emerald-400';
-  if (key === 'OLLAMA' || key === 'AI') return 'text-[#D4AF37]';
-  if (key === 'QUEUE') return 'text-cyan-400';
-  if (key === 'ERROR') return 'text-red-400';
-  return 'text-blue-400';
+  if (key === 'NMAP') return 'text-[#9db0ff]';
+  if (key === 'NUCLEI') return 'text-[#c5cedd]';
+  if (key === 'OLLAMA' || key === 'AI') return 'text-[#7ea0ff]';
+  if (key === 'QUEUE') return 'text-[#8b95a8]';
+  if (key === 'ERROR') return 'text-[#e07a7a]';
+  return 'text-[#7ea0ff]';
 }
 
 export function severityBadge(severity: LogSeverity): { label: string; className: string } | null {
   if (severity === 'critical') {
-    return { label: 'CRITICAL', className: 'text-red-400 font-bold' };
+    return { label: 'CRITICAL', className: 'text-[#e07a7a] font-bold' };
   }
   if (severity === 'error') {
-    return { label: 'ERROR', className: 'text-red-400 font-bold' };
+    return { label: 'ERROR', className: 'text-[#e07a7a] font-bold' };
   }
   if (severity === 'warning') {
-    return { label: 'WARNING', className: 'text-[#D4AF37] font-bold' };
+    return { label: 'WARNING', className: 'text-[#e0a85c] font-bold' };
   }
   return null;
 }

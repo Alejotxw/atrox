@@ -20,6 +20,39 @@ NucleiRunner = Callable[[list[str]], Awaitable[tuple[int, str, str]]]
 REQUIRED_JSONL_FIELDS = ("template-id", "host", "matched-at")
 REQUIRED_INFO_FIELDS = ("name", "severity")
 
+DOCKER_DOWN_HINT = (
+    "Docker Desktop no está en ejecución. Ábrelo, espera a que diga "
+    "«Engine running» y vuelve a iniciar la auditoría."
+)
+
+
+def humanize_nuclei_error(message: str | None, *, docker_mode: bool = False) -> str:
+    """Traduce errores crudos de Docker/Nuclei a un aviso entendible."""
+    raw = (message or "").strip()
+    if not raw:
+        return DOCKER_DOWN_HINT if docker_mode else "Nuclei falló sin detalle."
+
+    lower = raw.lower()
+    docker_markers = (
+        "dockerdesktoplinuxengine",
+        "npipe:",
+        "cannot connect to the docker",
+        "failed to connect to the docker",
+        "error during connect",
+        "docker daemon",
+        "is the docker daemon running",
+        "the system cannot find the file specified",
+        "el sistema no puede encontrar el archivo especificado",
+    )
+    if docker_mode or any(m in lower for m in docker_markers):
+        return DOCKER_DOWN_HINT
+    if "docker not found" in lower or "no se encontró docker" in lower:
+        return (
+            "No se encontró el comando Docker. Instala Docker Desktop o "
+            "desactiva ATROX_NUCLEI_DOCKER_IMAGE para usar Nuclei nativo."
+        )
+    return raw
+
 
 class NucleiTimeoutError(Exception):
     """Timeout de Nuclei con stdout/stderr parciales (si hubo).
@@ -147,6 +180,23 @@ class NucleiWrapper:
         )
         self.accept_partial_on_timeout = accept_partial_on_timeout
 
+    def _docker_daemon_ready(self) -> bool:
+        """True si el daemon de Docker responde (Desktop encendido)."""
+        try:
+            completed = subprocess.run(
+                ["docker", "info"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=8,
+                check=False,
+            )
+            return completed.returncode == 0
+        except FileNotFoundError:
+            return False
+        except Exception:
+            logger.exception("No se pudo comprobar el estado de Docker")
+            return False
+
     def _base_command(self) -> list[str]:
         """Comando base antes de los flags de Nuclei.
 
@@ -227,6 +277,13 @@ class NucleiWrapper:
         if self._on_command is not None:
             await self._on_command([*self._base_command(), *args])
 
+        if self._docker_image and self._runner is None and not self._docker_daemon_ready():
+            return VulnScanResult(
+                target=target,
+                status=ScanStatus.ERROR,
+                error=DOCKER_DOWN_HINT,
+            )
+
         try:
             return_code, stdout, stderr = await self._execute(args)
         except FileNotFoundError:
@@ -270,10 +327,11 @@ class NucleiWrapper:
             )
         except Exception as exc:
             logger.exception("Error inesperado escaneando %s", target)
+            raw = str(exc) or f"{type(exc).__name__} sin mensaje (ver logs del servidor)"
             return VulnScanResult(
                 target=target,
                 status=ScanStatus.ERROR,
-                error=str(exc) or f"{type(exc).__name__} sin mensaje (ver logs del servidor)",
+                error=humanize_nuclei_error(raw, docker_mode=bool(self._docker_image)),
             )
 
         if not stdout.strip() and return_code != 0:
@@ -281,7 +339,7 @@ class NucleiWrapper:
             return VulnScanResult(
                 target=target,
                 status=ScanStatus.ERROR,
-                error=message,
+                error=humanize_nuclei_error(message, docker_mode=bool(self._docker_image)),
             )
 
         findings = self._parse_jsonl(stdout)

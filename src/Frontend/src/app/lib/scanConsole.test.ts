@@ -31,7 +31,7 @@ describe('scanConsole helpers', () => {
   });
 
   it('maps module colors and severity badges', () => {
-    expect(moduleColorClass('NUCLEI')).toContain('emerald');
+    expect(moduleColorClass('NUCLEI')).toContain('c5cedd');
     expect(severityBadge('critical')?.label).toBe('CRITICAL');
     expect(severityBadge('info')).toBeNull();
   });

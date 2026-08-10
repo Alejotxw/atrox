@@ -642,3 +642,25 @@ class TestDockerMode:
 
         assert result.status == ScanStatus.ERROR
         assert "Docker" in result.error
+
+    def test_humanize_npipe_error(self) -> None:
+        from atrox.scanner.nuclei_wrapper import humanize_nuclei_error
+
+        msg = humanize_nuclei_error(
+            "failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine"
+        )
+        assert "Docker Desktop" in msg
+        assert "npipe" not in msg.lower()
+
+    def test_scan_aborts_early_when_docker_daemon_down(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            NucleiWrapper,
+            "_docker_daemon_ready",
+            lambda self: False,
+        )
+
+        wrapper = NucleiWrapper(docker_image="projectdiscovery/nuclei:latest")
+        result = asyncio.run(wrapper.scan("192.168.1.10"))
+
+        assert result.status == ScanStatus.ERROR
+        assert "Docker Desktop" in (result.error or "")

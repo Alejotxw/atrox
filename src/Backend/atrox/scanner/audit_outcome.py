@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 from atrox.queue.models import Job, JobStatus, JobType
 from atrox.queue.service import JobQueue
 from atrox.scanner.models import HostFinding, VulnFinding, VulnSeverity
-from atrox.scanner.nuclei_wrapper import humanize_nuclei_error
 
 
 def _normalize_target(value: str) -> str:
@@ -115,15 +114,14 @@ def empty_audit_findings(
             )
         )
 
-    nuclei_error = humanize_nuclei_error(nuclei_error) if nuclei_error else None
     nuclei_name = (
-        "Nuclei incompleto: Docker no disponible"
-        if nuclei_error and "Docker Desktop" in nuclei_error
-        else (f"Nuclei incompleto: {nuclei_error}" if nuclei_error else "Escaneo Nuclei sin vulnerabilidades critical/high/medium")
+        f"Nuclei incompleto: {nuclei_error}"
+        if nuclei_error
+        else "Escaneo Nuclei sin vulnerabilidades critical/high/medium"
     )
     nuclei_desc = (
         f"El job de vulnerabilidades sobre '{target}' no dejó CVEs persistidos"
-        + (f". {nuclei_error}" if nuclei_error else ".")
+        + (f" ({nuclei_error})." if nuclei_error else ".")
         + " El informe refleja este resultado negativo junto con la superficie Nmap si existió."
     )
     findings.append(

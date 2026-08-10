@@ -1,19 +1,20 @@
 import React, { useState } from 'react';
-import { ShieldAlert, KeyRound, Lock, ArrowRight, Loader2, AlertTriangle, QrCode, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { ShieldAlert, KeyRound, Lock, ArrowRight, ArrowLeft, Loader2, AlertTriangle, QrCode, ShieldCheck } from 'lucide-react';
 import QRCode from 'qrcode';
 import { loginApi, verifyMfaApi, getMfaSetupApi, setAuthToken, describeError } from '../../lib/api';
 
 interface LoginFormProps {
-  onSuccess: (username: string) => void;
+  onSuccess: (username: string, role: string) => void;
+  onBack?: () => void;
 }
 
-export default function LoginForm({ onSuccess }: LoginFormProps) {
+export default function LoginForm({ onSuccess, onBack }: LoginFormProps) {
   const [step, setStep] = useState<1 | 2>(1);
-  const [username, setUsername] = useState('sysadmin');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [mfaToken, setMfaToken] = useState('');
   const [totpCode, setTotpCode] = useState('');
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSetupModal, setShowSetupModal] = useState(false);
@@ -29,8 +30,14 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
     setError(null);
     try {
       const res = await loginApi(username, password);
-      setMfaToken(res.mfa_token);
-      setStep(2);
+      if (res.mfa_required && res.mfa_token) {
+        setMfaToken(res.mfa_token);
+        setStep(2);
+      } else if (res.session_token && res.user) {
+        // Cuentas regulares (aprobadas desde una solicitud de acceso): sin TOTP, sesión directa
+        setAuthToken(res.session_token);
+        onSuccess(res.user.username, res.user.role);
+      }
     } catch (err: any) {
       setError(describeError(err));
     } finally {
@@ -48,7 +55,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
     try {
       const res = await verifyMfaApi(mfaToken, totpCode);
       setAuthToken(res.session_token);
-      onSuccess(res.user.username);
+      onSuccess(res.user.username, res.user.role);
     } catch (err: any) {
       setError(describeError(err));
     } finally {
@@ -78,7 +85,16 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
   return (
     <div className="min-h-screen bg-[var(--ax-bg)] flex items-center justify-center p-4" style={{ fontFamily: 'var(--font-sans)' }}>
       <div className="w-full max-w-md bg-[var(--ax-surface)] border border-[var(--ax-border)] rounded-lg p-6 sm:p-8">
-        
+
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-[var(--ax-brand)] mb-6 transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" /> Volver al inicio
+          </button>
+        )}
+
         {/* Header Branding */}
         <div className="flex items-center gap-3.5 mb-8">
           <div className="w-12 h-12 rounded-lg bg-[var(--ax-brand)] flex items-center justify-center">
@@ -96,8 +112,8 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
             {step === 1 ? 'Iniciar Sesión' : 'Segundo Factor (MFA / TOTP)'}
           </h2>
           <p className="text-xs text-slate-400">
-            {step === 1 
-              ? 'Ingrese sus credenciales de administrador para continuar' 
+            {step === 1
+              ? 'Ingrese sus credenciales para continuar'
               : `Ingrese el código de 6 dígitos enviado a su app autenticadora para ${username}`}
           </p>
         </div>
@@ -125,7 +141,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 bg-[#1a1820] border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-[var(--ax-brand)] focus:border-transparent transition-all"
-                  placeholder="sysadmin"
+                  placeholder="Usuario"
                 />
               </div>
             </div>

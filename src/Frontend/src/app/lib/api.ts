@@ -75,8 +75,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface LoginStep1Response {
   mfa_required: boolean;
-  mfa_token: string;
-  message: string;
+  // Presentes solo cuando mfa_required === true (sysadmin único, con TOTP)
+  mfa_token?: string;
+  message?: string;
+  // Presentes solo cuando mfa_required === false (cuentas regulares, sin TOTP)
+  session_token?: string;
+  expires_in_minutes?: number;
+  user?: { username: string; role: string };
 }
 
 export interface MfaVerifyResponse {
@@ -98,6 +103,7 @@ export interface UserStatusResponse {
   username: string;
   expires_at: number;
   seconds_remaining: number;
+  role: 'SysAdmin' | 'Usuario';
 }
 
 export function loginApi(username: string, password: string): Promise<LoginStep1Response> {
@@ -125,6 +131,127 @@ export function getMeApi(): Promise<UserStatusResponse> {
 export function logoutApi(): Promise<{ message: string }> {
   return request<{ message: string }>('/api/auth/logout', {
     method: 'POST',
+  });
+}
+
+// -- Tipos que reflejan atrox/access_requests/models.py (landing page pre-login) --
+
+export interface AccessRequestPayload {
+  full_name: string;
+  email: string;
+  organization: string;
+  role: string;
+  reason: string;
+}
+
+export interface AccessRequestResponse extends AccessRequestPayload {
+  id: string;
+  created_at: string;
+}
+
+export function submitAccessRequestApi(payload: AccessRequestPayload): Promise<AccessRequestResponse> {
+  return request<AccessRequestResponse>('/api/access-requests', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+// -- Panel de administración: solicitudes de acceso y cuentas (super admin) ----
+
+export type AccessRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface AdminAccessRequest extends AccessRequestPayload {
+  id: string;
+  status: AccessRequestStatus;
+  reviewed_at: string | null;
+  review_reason: string | null;
+  account_id: string | null;
+  created_at: string;
+}
+
+export interface AccessRequestListResult {
+  total: number;
+  requests: AdminAccessRequest[];
+}
+
+export function listAccessRequestsApi(): Promise<AccessRequestListResult> {
+  return request<AccessRequestListResult>('/api/access-requests');
+}
+
+export type AccountStatus = 'active' | 'suspended' | 'deleted';
+export type ModerationNoteKind = 'warning' | 'report';
+
+export interface ModerationNote {
+  id: string;
+  kind: ModerationNoteKind;
+  reason: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface Account {
+  id: string;
+  username: string;
+  full_name: string;
+  email: string;
+  organization: string;
+  role: string;
+  status: AccountStatus;
+  access_request_id: string | null;
+  moderation_notes: ModerationNote[];
+  created_at: string;
+}
+
+export interface AccountListResult {
+  total: number;
+  accounts: Account[];
+}
+
+export interface ApproveAccessRequestResponse {
+  account: Account;
+  temporary_password: string;
+}
+
+export function approveAccessRequestApi(requestId: string): Promise<ApproveAccessRequestResponse> {
+  return request<ApproveAccessRequestResponse>(`/api/access-requests/${requestId}/approve`, {
+    method: 'POST',
+  });
+}
+
+export function rejectAccessRequestApi(requestId: string, reason?: string): Promise<AdminAccessRequest> {
+  return request<AdminAccessRequest>(`/api/access-requests/${requestId}/reject`, {
+    method: 'POST',
+    body: reason ? JSON.stringify({ reason }) : undefined,
+  });
+}
+
+export function listAccountsApi(): Promise<AccountListResult> {
+  return request<AccountListResult>('/api/accounts');
+}
+
+export function suspendAccountApi(accountId: string): Promise<Account> {
+  return request<Account>(`/api/accounts/${accountId}/suspend`, { method: 'POST' });
+}
+
+export function reactivateAccountApi(accountId: string): Promise<Account> {
+  return request<Account>(`/api/accounts/${accountId}/reactivate`, { method: 'POST' });
+}
+
+export function deleteAccountApi(accountId: string): Promise<Account> {
+  return request<Account>(`/api/accounts/${accountId}`, { method: 'DELETE' });
+}
+
+export function warnAccountApi(accountId: string, reason: string): Promise<Account> {
+  return request<Account>(`/api/accounts/${accountId}/warnings`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function reportAccountApi(accountId: string, reason: string): Promise<Account> {
+  return request<Account>(`/api/accounts/${accountId}/reports`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
   });
 }
 

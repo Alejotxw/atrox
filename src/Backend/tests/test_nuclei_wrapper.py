@@ -348,54 +348,11 @@ class TestNucleiWrapperErrorHandling:
             await asyncio.sleep(2)
             return 0, "", ""
 
-        # Sin accept_partial: sigue siendo TIMEOUT (comportamiento estricto).
-        wrapper = NucleiWrapper(
-            timeout_seconds=1,
-            runner=slow_runner,
-            accept_partial_on_timeout=False,
-        )
+        wrapper = NucleiWrapper(timeout_seconds=1, runner=slow_runner)
         result = asyncio.run(wrapper.scan("192.168.1.10"))
 
         assert result.status == ScanStatus.TIMEOUT
         assert "tiempo límite" in (result.error or "").lower() or "1s" in (result.error or "")
-
-    def test_timeout_without_findings_still_completes_when_partial_enabled(self) -> None:
-        async def slow_runner(_args: list[str]) -> tuple[int, str, str]:
-            await asyncio.sleep(2)
-            return 0, "", ""
-
-        wrapper = NucleiWrapper(
-            timeout_seconds=1,
-            runner=slow_runner,
-            accept_partial_on_timeout=True,
-        )
-        result = asyncio.run(wrapper.scan("192.168.1.10"))
-
-        assert result.status == ScanStatus.COMPLETED
-        assert result.findings == []
-        assert "truncado" in (result.error or "").lower()
-
-    def test_timeout_with_partial_findings_returns_completed(self) -> None:
-        from atrox.scanner.nuclei_wrapper import NucleiTimeoutError
-
-        partial = (
-            '{"template-id":"cve-x","info":{"name":"X","severity":"high"},'
-            '"host":"http://t","matched-at":"http://t/"}\n'
-        )
-
-        async def partial_timeout_runner(_args: list[str]) -> tuple[int, str, str]:
-            raise NucleiTimeoutError("timeout", stdout=partial, stderr="")
-
-        wrapper = NucleiWrapper(
-            timeout_seconds=1,
-            runner=partial_timeout_runner,
-            accept_partial_on_timeout=True,
-        )
-        result = asyncio.run(wrapper.scan("192.168.1.10"))
-
-        assert result.status == ScanStatus.COMPLETED
-        assert len(result.findings) == 1
-        assert "parciales" in (result.error or "").lower()
 
     def test_scan_handles_empty_stdout_nonzero_exit(self) -> None:
         async def error_runner(_args: list[str]) -> tuple[int, str, str]:
@@ -439,18 +396,71 @@ class TestNucleiWrapperCLIArgs:
         assert "-silent" in args
         assert "-nc" in args
         assert "-or" in args
-        assert "-c" in args
-        assert args[args.index("-c") + 1] == "80"
-        assert "-rl" in args
-        assert "-timeout" in args
-        assert "-retries" in args
-        assert "-mhe" in args
-        assert "-ni" in args
-        assert "-duc" in args
-        assert "-etags" in args
-        assert "dos,fuzz,intrusive" in args[args.index("-etags") + 1]
 
-    def test_scan_includes_protocols_flag(self) -> None:
+
+class TestNucleiWrapperPerformanceFlags:
+    """Flags que acotan el tiempo total del escaneo (-c/-timeout/-retries/-etags).
+
+    Todos son opcionales (None = usar el default propio de Nuclei) para no
+    romper la construcción de comandos en tests que no los configuran."""
+
+    def test_scan_adds_concurrency_flag_when_configured(self) -> None:
+        captured_args: list[list[str]] = []
+
+        async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
+            captured_args.append(args)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(runner=capturing_runner, concurrency=50)
+        asyncio.run(wrapper.scan("192.168.1.10"))
+
+        args = captured_args[0]
+        assert "-c" in args
+        assert args[args.index("-c") + 1] == "50"
+
+    def test_scan_adds_request_timeout_flag_when_configured(self) -> None:
+        captured_args: list[list[str]] = []
+
+        async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
+            captured_args.append(args)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(runner=capturing_runner, request_timeout_seconds=5)
+        asyncio.run(wrapper.scan("192.168.1.10"))
+
+        args = captured_args[0]
+        assert "-timeout" in args
+        assert args[args.index("-timeout") + 1] == "5"
+
+    def test_scan_adds_retries_flag_when_configured(self) -> None:
+        captured_args: list[list[str]] = []
+
+        async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
+            captured_args.append(args)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(runner=capturing_runner, retries=0)
+        asyncio.run(wrapper.scan("192.168.1.10"))
+
+        args = captured_args[0]
+        assert "-retries" in args
+        assert args[args.index("-retries") + 1] == "0"
+
+    def test_scan_adds_exclude_tags_flag_when_configured(self) -> None:
+        captured_args: list[list[str]] = []
+
+        async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
+            captured_args.append(args)
+            return 0, "", ""
+
+        wrapper = NucleiWrapper(runner=capturing_runner, exclude_tags=["dos", "fuzz"])
+        asyncio.run(wrapper.scan("192.168.1.10"))
+
+        args = captured_args[0]
+        assert "-etags" in args
+        assert args[args.index("-etags") + 1] == "dos,fuzz"
+
+    def test_scan_omits_performance_flags_when_not_configured(self) -> None:
         captured_args: list[list[str]] = []
 
         async def capturing_runner(args: list[str]) -> tuple[int, str, str]:
@@ -458,11 +468,13 @@ class TestNucleiWrapperCLIArgs:
             return 0, "", ""
 
         wrapper = NucleiWrapper(runner=capturing_runner)
-        asyncio.run(wrapper.scan("example.com", protocols=["http"]))
+        asyncio.run(wrapper.scan("192.168.1.10"))
 
         args = captured_args[0]
-        assert "-type" in args
-        assert args[args.index("-type") + 1] == "http"
+        assert "-c" not in args
+        assert "-timeout" not in args
+        assert "-retries" not in args
+        assert "-etags" not in args
 
 
 class TestRealSubprocessPath:
@@ -489,11 +501,9 @@ class TestRealSubprocessPath:
             asyncio.run(wrapper._execute(["--version"]))
 
     def test_execute_raises_timeout_error_when_process_hangs(self) -> None:
-        from atrox.scanner.nuclei_wrapper import NucleiTimeoutError
-
         wrapper = NucleiWrapper(nuclei_path=sys.executable, timeout_seconds=1)
 
-        with pytest.raises(NucleiTimeoutError):
+        with pytest.raises(asyncio.TimeoutError):
             asyncio.run(
                 wrapper._execute(["-c", "import time; time.sleep(5)"])
             )
@@ -621,9 +631,7 @@ class TestDockerMode:
 
         wrapper = NucleiWrapper(docker_image="projectdiscovery/nuclei:latest", timeout_seconds=1)
 
-        from atrox.scanner.nuclei_wrapper import NucleiTimeoutError
-
-        with pytest.raises(NucleiTimeoutError):
+        with pytest.raises(TimeoutError):
             wrapper._run_subprocess_blocking(["-u", "192.168.1.10"])
 
         assert len(killed) == 1
@@ -642,25 +650,3 @@ class TestDockerMode:
 
         assert result.status == ScanStatus.ERROR
         assert "Docker" in result.error
-
-    def test_humanize_npipe_error(self) -> None:
-        from atrox.scanner.nuclei_wrapper import humanize_nuclei_error
-
-        msg = humanize_nuclei_error(
-            "failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine"
-        )
-        assert "Docker Desktop" in msg
-        assert "npipe" not in msg.lower()
-
-    def test_scan_aborts_early_when_docker_daemon_down(self, monkeypatch) -> None:
-        monkeypatch.setattr(
-            NucleiWrapper,
-            "_docker_daemon_ready",
-            lambda self: False,
-        )
-
-        wrapper = NucleiWrapper(docker_image="projectdiscovery/nuclei:latest")
-        result = asyncio.run(wrapper.scan("192.168.1.10"))
-
-        assert result.status == ScanStatus.ERROR
-        assert "Docker Desktop" in (result.error or "")

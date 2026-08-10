@@ -64,21 +64,6 @@ def test_resolve_uses_nuclei_when_present():
     assert resolved[0].template_id == "cve-2021-44228"
 
 
-def test_empty_audit_humanizes_docker_pipe_error():
-    findings = empty_audit_findings(
-        "example.com",
-        hosts=[],
-        nuclei_error=(
-            "failed to connect to the docker API at "
-            "npipe:////./pipe/dockerDesktopLinuxEngine"
-        ),
-    )
-    nuclei = next(f for f in findings if f.template_id == "audit:nuclei-error")
-    assert "Docker Desktop" in nuclei.name or "Docker Desktop" in nuclei.description
-    assert "npipe" not in nuclei.name.lower()
-    assert "npipe" not in nuclei.description.lower()
-
-
 def test_resolve_synthesizes_when_nuclei_empty():
     queue = JobQueue(max_concurrent=2, max_queue_size=10)
     disc = Job(

@@ -7,6 +7,10 @@ from pathlib import Path
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from atrox.access_requests.store import AccessRequestStore
+from atrox.accounts.store import AccountStore
+from atrox.api.access_requests import router as access_requests_router
+from atrox.api.accounts import router as accounts_router
 from atrox.api.audit import router as audit_router
 from atrox.api.auth import router as auth_router
 from atrox.api.chat import router as chat_router
@@ -82,7 +86,7 @@ async def _dispatch_scan(job: Job) -> dict:
         )
         result = await wrapper.scan(
             target=job.params["target"],
-            port_range=job.params.get("port_range", settings.nmap_default_port_range),
+            port_range=job.params.get("port_range", "1-1024"),
         )
         _raise_if_tool_failed(result)
 
@@ -105,12 +109,9 @@ async def _dispatch_scan(job: Job) -> dict:
         docker_image=settings.nuclei_docker_image,
         docker_templates_volume=settings.nuclei_docker_templates_volume,
         concurrency=settings.nuclei_concurrency,
-        rate_limit=settings.nuclei_rate_limit,
-        request_timeout=settings.nuclei_request_timeout,
+        request_timeout_seconds=settings.nuclei_request_timeout_seconds,
         retries=settings.nuclei_retries,
-        max_host_error=settings.nuclei_max_host_error,
         exclude_tags=settings.nuclei_exclude_tags,
-        accept_partial_on_timeout=settings.nuclei_accept_partial_on_timeout,
     )
     severity_param = job.params.get("severity") or job.params.get("severities")
     if isinstance(severity_param, str):
@@ -118,28 +119,11 @@ async def _dispatch_scan(job: Job) -> dict:
     else:
         severities = severity_param
 
-    protocols_param = job.params.get("type") or job.params.get("protocols")
-    if isinstance(protocols_param, str):
-        protocols = [p.strip() for p in protocols_param.split(",") if p.strip()]
-    elif isinstance(protocols_param, list):
-        protocols = [str(p).strip() for p in protocols_param if str(p).strip()]
-    else:
-        protocols = list(settings.nuclei_default_protocols)
-
-    tags_param = job.params.get("tags")
-    if isinstance(tags_param, str):
-        tags = [t.strip() for t in tags_param.split(",") if t.strip()]
-    elif isinstance(tags_param, list):
-        tags = [str(t).strip() for t in tags_param if str(t).strip()]
-    else:
-        tags = None
-
     result = await wrapper_nuclei.scan(
         target=job.params["target"],
         templates=job.params.get("templates"),
         severities=severities,
-        tags=tags,
-        protocols=protocols or None,
+        tags=job.params.get("tags"),
     )
     _raise_if_tool_failed(result)
 
@@ -236,6 +220,19 @@ async def lifespan(app: FastAPI):
         encryptor=fp_encryptor,
     )
 
+    # Solicitudes de acceso desde la landing page (mismo encryptor que arriba)
+    app.state.access_request_store = AccessRequestStore(
+        store_path=Path(settings.access_request_store_path),
+        encryptor=fp_encryptor,
+    )
+
+    # Cuentas de usuario creadas al aprobar una solicitud (mismo encryptor que arriba)
+    app.state.account_store = AccountStore(
+        store_path=Path(settings.account_store_path),
+        encryptor=fp_encryptor,
+        reserved_usernames=frozenset({settings.admin_username}),
+    )
+
     # Sincronización diaria NVD (HU-005 / RF-010): el scheduler duerme
     # primero, así el arranque no hace llamadas de red; la primera
     # sincronización se dispara manualmente (POST /api/threats/sync o CLI).
@@ -281,6 +278,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(health_router)
+    application.include_router(access_requests_router)
+    application.include_router(accounts_router)
     application.include_router(auth_router)
     application.include_router(discovery_router)
     application.include_router(vulnscan_router)

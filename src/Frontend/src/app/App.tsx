@@ -122,6 +122,18 @@ const humanizeAuditToolError = (message: string | null | undefined): string => {
   return raw;
 };
 
+const humanizeFindingName = (name: string): string => {
+  const lower = (name || '').toLowerCase();
+  if (
+    lower.includes('npipe') ||
+    lower.includes('dockerdesktoplinuxengine') ||
+    lower.includes('failed to connect to the docker')
+  ) {
+    return 'Nuclei incompleto: Docker Desktop no estaba en ejecución';
+  }
+  return name;
+};
+
 // --- Sondeo de un scan hasta que quede 'done' o 'failed' ---
 async function pollScanUntilDone(
   scanId: string,
@@ -400,7 +412,7 @@ export default function App() {
         setFindings(
           items.map((f) => ({
             id: f.template_id,
-            name: f.name,
+            name: humanizeFindingName(f.name),
             vector: f.matched_at || f.host,
             severity: mapSeverity(f.severity),
             status: (f.severity === 'info' ? 'na' : 'unchecked') as FindingStatus,
@@ -982,8 +994,8 @@ export default function App() {
                     </section>
 
                     {auditWarning && (
-                      <div className="flex items-start gap-3 text-xs text-[var(--ax-warn)] border border-[var(--ax-border)] rounded-md px-3 py-2.5 bg-[var(--ax-surface)]">
-                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div className="flex items-start gap-3 text-xs text-[var(--ax-muted)] border border-[var(--ax-border)] rounded-md px-3 py-2.5 bg-[var(--ax-surface)]">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[var(--ax-muted)]" />
                         <div>
                           <span className="font-semibold text-[var(--ax-text)]">Aviso.</span> {auditWarning}
                         </div>

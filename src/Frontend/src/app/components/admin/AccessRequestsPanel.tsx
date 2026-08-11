@@ -25,9 +25,9 @@ const STATUS_LABEL: Record<AccessRequestStatus, string> = {
 };
 
 const STATUS_BADGE: Record<AccessRequestStatus, string> = {
-  pending: 'bg-[#D4AF37]/10 text-[#D4AF37] border-[#D4AF37]/30',
-  approved: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
-  rejected: 'bg-red-500/10 text-red-400 border-red-500/30',
+  pending: 'bg-[#2a2418] text-[#c4b08a] border-[#4a4030]',
+  approved: 'bg-[#1a2420] text-[#9aafa3] border-[#3a4a42]',
+  rejected: 'bg-[#24181c] text-[#c49aa6] border-[#4a3038]',
 };
 
 const FILTERS: { value: AccessRequestStatus | 'all'; label: string }[] = [
@@ -177,7 +177,7 @@ export default function AccessRequestsPanel() {
                           <button
                             onClick={() => handleApprove(r.id)}
                             disabled={actioningId === r.id}
-                            className="flex items-center gap-1.5 text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+                            className="flex items-center gap-1.5 text-xs font-medium bg-[var(--ax-surface-2)] text-[var(--ax-text)] border border-[var(--ax-border)] hover:border-[var(--ax-border-strong)] hover:bg-[#1a2420] hover:text-[#9aafa3] px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
                           >
                             {actioningId === r.id ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -189,7 +189,7 @@ export default function AccessRequestsPanel() {
                           <button
                             onClick={() => setRejectingId(r.id)}
                             disabled={actioningId === r.id}
-                            className="flex items-center gap-1.5 text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+                            className="flex items-center gap-1.5 text-xs font-medium bg-[var(--ax-surface-2)] text-[var(--ax-muted)] border border-[var(--ax-border)] hover:border-[#4a3038] hover:bg-[#24181c] hover:text-[#c49aa6] px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
                           >
                             <UserX className="w-3.5 h-3.5" />
                             Rechazar
@@ -229,7 +229,7 @@ export default function AccessRequestsPanel() {
               <button
                 onClick={handleConfirmReject}
                 disabled={actioningId === rejectingId}
-                className="w-1/2 bg-red-600 hover:bg-red-700 text-white py-2.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-1/2 bg-[var(--ax-brand)] hover:bg-[var(--ax-brand-hover)] text-white py-2.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {actioningId === rejectingId ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirmar rechazo'}
               </button>
@@ -249,7 +249,7 @@ export default function AccessRequestsPanel() {
             >
               <X className="w-4 h-4" />
             </button>
-            <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-400 mx-auto flex items-center justify-center border border-emerald-500/30">
+            <div className="w-12 h-12 rounded-lg bg-[#1a2420] text-[#9aafa3] mx-auto flex items-center justify-center border border-[#3a4a42]">
               <CheckCircle2 className="w-6 h-6" />
             </div>
             <h3 className="text-white font-bold text-base">Cuenta creada</h3>
@@ -263,7 +263,7 @@ export default function AccessRequestsPanel() {
               </div>
               <div>
                 <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Contraseña temporal</p>
-                <p className="font-mono text-sm text-[#D4AF37] select-all break-all">{credentials.password}</p>
+                <p className="font-mono text-sm text-[#c4b08a] select-all break-all">{credentials.password}</p>
               </div>
             </div>
             <button

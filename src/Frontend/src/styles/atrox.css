@@ -8,11 +8,11 @@
   --ax-border-strong: #454d5c;
   --ax-text: #eef1f6;
   --ax-muted: #939aa8;
-  --ax-brand: #4f74d4;
-  --ax-brand-soft: #182033;
-  --ax-brand-hover: #3f61bc;
+  --ax-brand: #7a1c3e;
+  --ax-brand-soft: #231018;
+  --ax-brand-hover: #90244b;
   --ax-accent: #b4bcc9;
-  --ax-info: #7f98cc;
+  --ax-info: #9a7a88;
   --ax-ok: #7f98cc;
   --ax-warn: #d0a55a;
   --ax-danger: #d07a84;
@@ -299,8 +299,8 @@
 
 .atrox-task-card.is-selected .atrox-task-icon {
   border-color: var(--ax-brand);
-  color: #d7e0ff;
-  background: #1a2744;
+  color: #f0d4de;
+  background: #2a1520;
 }
 
 .atrox-task-check {

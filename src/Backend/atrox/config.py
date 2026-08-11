@@ -97,10 +97,15 @@ class Settings(BaseSettings):
     llm_provider: str = "mock"
     llm_model: str | None = None
     llm_api_key: str | None = None
-    llm_timeout_seconds: int = 30
+    # Modelos locales suelen necesitar más de 30s; 180s evita cortar el pentest.
+    llm_timeout_seconds: int = 180
     llm_gemini_model: str = "gemini-2.0-flash"
     llm_ollama_base_url: str = "http://localhost:11434"
     llm_ollama_model: str = "llama3"
+    # Límites de generación Ollama (menos tokens = respuesta más rápida).
+    llm_ollama_num_predict: int = 640
+    llm_ollama_num_ctx: int = 4096
+    llm_ollama_keep_alive: str = "10m"
     llm_fallback_providers: list[str] = []
 
     # Sincronización diaria de base de amenazas NVD (HU-005 / RF-010)

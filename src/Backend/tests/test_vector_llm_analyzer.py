@@ -80,7 +80,7 @@ class TestBuildPrompt:
         assert "SQL Injection (Blind)" in prompt
         assert "192.168.1.10" in prompt
         assert '"vectors"' in prompt  # esquema JSON incluido
-        assert "atacante" in prompt.lower()
+        assert "ataque" in prompt.lower()
 
 
 class TestAnalyzeWithLLM:

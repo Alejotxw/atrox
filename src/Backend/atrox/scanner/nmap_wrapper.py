@@ -100,8 +100,15 @@ class NmapWrapper:
         self._on_command = on_command
 
     async def scan(self, target: str, port_range: str) -> DiscoveryScanResult:
+        # Flags rápidos para demos (<2 min): timing agresivo, menos reintentos
+        # y versionado ligero (el -sV completo sobre 1-1024 es lo que demora minutos).
         args = [
             "-sV",
+            "--version-intensity",
+            "2",
+            "-T4",
+            "--max-retries",
+            "1",
             "-p",
             port_range,
             "-oX",

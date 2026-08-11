@@ -87,7 +87,10 @@ class AccessRequestStore:
     async def list_all(self) -> list[AccessRequest]:
         """Lista todas las solicitudes, más recientes primero."""
         catalog = await self._load()
-        return sorted(catalog.values(), key=lambda r: r.created_at, reverse=True)
+        # Desempate por orden de inserción si created_at coincide.
+        indexed = list(enumerate(catalog.values()))
+        indexed.sort(key=lambda item: (item[1].created_at, item[0]), reverse=True)
+        return [record for _, record in indexed]
 
     async def mark_approved(self, request_id: UUID, account_id: UUID) -> AccessRequest:
         return await self._update_status(

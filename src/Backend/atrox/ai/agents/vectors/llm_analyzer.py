@@ -15,38 +15,45 @@ from atrox.ai.schemas.rejections import RejectionLogger
 from atrox.ai.schemas.validator import LLMResponseValidator
 from atrox.scanner.models import VulnFinding
 
-_SYSTEM_INSTRUCTIONS = """Eres un analista senior de pentesting. Analiza estos hallazgos reales de un escaneo de vulnerabilidades como lo haría un atacante: identifica qué combinaciones son explotables en conjunto (cadenas de ataque), qué podría lograr un atacante concretamente con cada uno, y prioriza por impacto real de negocio — no repitas la descripción técnica de la vulnerabilidad, explica sus consecuencias prácticas.
-
-Responde ÚNICAMENTE con un objeto JSON que cumpla exactamente este esquema, sin texto adicional ni bloques markdown:
+# Prompt corto a propósito: menos tokens de entrada = menos latencia en Ollama.
+_SYSTEM_INSTRUCTIONS = """Analista de pentesting. Con estos hallazgos, propone vectores de ataque encadenados.
+Responde SOLO JSON con este esquema (sin markdown):
 {schema}
 
-Reglas:
-- "chain": pasos concretos y accionables que seguiría un atacante, en español, en orden.
-- "justification": 2-3 frases explicando QUÉ puede lograr un atacante con este hallazgo específico (no una definición genérica de la vulnerabilidad).
-- "estimated_impact": consecuencia de negocio concreta (ej. "acceso a base de datos de clientes", "control total del servidor web"), no solo la palabra "alto" o "crítico".
-- "severity_score": número de 0 a 10, considerando severidad técnica Y explotabilidad real.
-- "rank": 1 = mayor prioridad para un atacante real.
-- "vector_id": identificador corto único (ej. "sqli-login-to-db").
-- "finding_ids": SOLO el valor del template_id (ej. "sqli-login-blind"), NUNCA el prefijo "template_id=".
-- Si dos o más hallazgos se pueden encadenar entre sí, represéntalos como UN solo vector con todos sus finding_ids.
-- No inventes hallazgos que no estén en la lista."""
+Reglas breves:
+- chain: pasos accionables en español.
+- justification: 1-2 frases de impacto real.
+- estimated_impact: consecuencia de negocio concreta.
+- severity_score: 0-10; rank: 1 = mayor prioridad.
+- vector_id: id corto; finding_ids: solo template_id.
+- Encadena hallazgos relacionados en un solo vector. No inventes hallazgos."""
+
+_DESC_MAX = 160
+
+
+def _truncate(text: str, limit: int = _DESC_MAX) -> str:
+    cleaned = " ".join((text or "").split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: limit - 1] + "…"
 
 
 def _describe_finding(finding: VulnFinding) -> str:
     return (
-        f'- ID "{finding.template_id}" · severidad {finding.severity.value} · '
-        f"nombre {finding.name} · ubicación {finding.matched_at or finding.host} · "
-        f"ip {finding.ip or 'desconocida'} · tags {', '.join(finding.tags) or 'ninguno'} · "
-        f"descripción {finding.description or 'sin descripción'}"
+        f'- "{finding.template_id}" | {finding.severity.value} | '
+        f"{_truncate(finding.name, 80)} | "
+        f"{_truncate(finding.matched_at or finding.host, 100)} | "
+        f"ip {finding.ip or '?'} | "
+        f"{_truncate(finding.description or '-', _DESC_MAX)}"
     )
 
 
 def build_prompt(findings: list[VulnFinding]) -> str:
-    """Arma el prompt de análisis con los hallazgos reales del escaneo."""
+    """Arma un prompt compacto con los hallazgos priorizados del escaneo."""
     schema = json.dumps(AttackVectorLLMPayload.model_json_schema(), ensure_ascii=False)
     findings_block = "\n".join(_describe_finding(f) for f in findings)
     instructions = _SYSTEM_INSTRUCTIONS.format(schema=schema)
-    return f"{instructions}\n\nHallazgos del escaneo:\n{findings_block}"
+    return f"{instructions}\n\nHallazgos:\n{findings_block}"
 
 
 async def analyze_with_llm(
@@ -54,14 +61,15 @@ async def analyze_with_llm(
     provider: LLMProvider,
     *,
     rejection_logger: RejectionLogger | None = None,
-    max_retries: int = 1,
+    max_retries: int = 0,
 ) -> list[AttackVector]:
     """Pide al LLM un análisis real de qué puede lograr un atacante con los hallazgos.
 
-    Deja propagar `LLMGenerationError` (LLM caído/no configurado) y
-    `LLMResponseError`/`ValidationRetriesExhaustedError` (respuesta inválida
-    tras reintentos) — el llamador (`VectorAnalysisAgent`) debe capturarlos y
-    usar el motor heurístico como respaldo.
+    `max_retries=0` por defecto: un solo intento. Un reintento duplica la espera
+    en modelos locales lentos y suele cortar la auditoría por timeout.
+
+    Deja propagar `LLMGenerationError` / errores de validación — el llamador
+    (`VectorAnalysisAgent`) debe capturarlos y usar el motor heurístico.
     """
     prompt = build_prompt(findings)
     schema = AttackVectorLLMPayload.model_json_schema()

@@ -1,0 +1,447 @@
+/* Atrox — UI guiada por pasos, clara y plana */
+
+:root {
+  --ax-bg: #0c0e12;
+  --ax-surface: #14181f;
+  --ax-surface-2: #1b2029;
+  --ax-border: #2e3440;
+  --ax-border-strong: #454d5c;
+  --ax-text: #eef1f6;
+  --ax-muted: #939aa8;
+  --ax-brand: #7a1c3e;
+  --ax-brand-soft: #231018;
+  --ax-brand-hover: #90244b;
+  --ax-accent: #b4bcc9;
+  --ax-info: #9a7a88;
+  --ax-ok: #7f98cc;
+  --ax-warn: #d0a55a;
+  --ax-danger: #d07a84;
+  --ax-radius: 10px;
+  --ax-gap: 1.35rem;
+}
+
+.atrox-shell {
+  font-family: var(--font-sans);
+  color: var(--ax-text);
+  background: var(--ax-bg);
+}
+
+.atrox-shell * {
+  font-family: inherit;
+}
+
+.atrox-shell .font-mono,
+.atrox-shell input[type='text'],
+.atrox-shell code,
+.atrox-shell pre {
+  font-family: var(--font-mono);
+}
+
+.atrox-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ax-gap);
+}
+
+.atrox-section-title {
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ax-text);
+}
+
+.atrox-section-sub {
+  font-size: 0.8rem;
+  color: var(--ax-muted);
+  margin-top: 0.3rem;
+  line-height: 1.45;
+  max-width: 42rem;
+}
+
+.atrox-panel {
+  background: var(--ax-surface);
+  border: 1px solid var(--ax-border);
+  border-radius: var(--ax-radius);
+}
+
+.atrox-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--ax-border);
+}
+
+.atrox-kpi {
+  background: var(--ax-surface);
+  border: 1px solid var(--ax-border);
+  border-radius: var(--ax-radius);
+  padding: 1rem 1.1rem;
+  min-height: 6.25rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.atrox-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (min-width: 900px) {
+  .atrox-kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.atrox-btn-primary {
+  background: var(--ax-brand);
+  color: #fff;
+  border: 1px solid var(--ax-brand);
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.atrox-btn-primary:hover:not(:disabled) {
+  background: var(--ax-brand-hover);
+  border-color: var(--ax-brand-hover);
+}
+
+.atrox-btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.atrox-btn-ghost {
+  background: transparent;
+  color: var(--ax-muted);
+  border: 1px solid var(--ax-border);
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.atrox-btn-ghost:hover:not(:disabled) {
+  color: var(--ax-text);
+  border-color: var(--ax-border-strong);
+  background: var(--ax-surface-2);
+}
+
+.atrox-btn-lg {
+  padding: 0.85rem 1.35rem;
+  font-size: 0.95rem;
+}
+
+.atrox-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--ax-border);
+  background: var(--ax-surface-2);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--ax-muted);
+}
+
+.atrox-status.is-online {
+  color: var(--ax-info);
+  border-color: var(--ax-border-strong);
+}
+
+.atrox-status.is-offline {
+  color: var(--ax-danger);
+}
+
+/* —— Pasos —— */
+.atrox-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.atrox-step {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--ax-border);
+  border-radius: 8px;
+  background: var(--ax-surface);
+  min-width: 0;
+}
+
+.atrox-step.is-current {
+  border-color: var(--ax-brand);
+  background: var(--ax-brand-soft);
+}
+
+.atrox-step.is-done {
+  border-color: var(--ax-border-strong);
+}
+
+.atrox-step-num {
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  border: 1px solid var(--ax-border);
+  color: var(--ax-muted);
+  background: var(--ax-bg);
+}
+
+.atrox-step.is-current .atrox-step-num {
+  background: var(--ax-brand);
+  border-color: var(--ax-brand);
+  color: #fff;
+}
+
+.atrox-step.is-done .atrox-step-num {
+  background: var(--ax-surface-2);
+  border-color: var(--ax-border-strong);
+  color: var(--ax-text);
+}
+
+.atrox-step-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ax-muted);
+  line-height: 1.2;
+}
+
+.atrox-step.is-current .atrox-step-label,
+.atrox-step.is-done .atrox-step-label {
+  color: var(--ax-text);
+}
+
+.atrox-step-hint {
+  display: none;
+  font-size: 0.68rem;
+  color: var(--ax-muted);
+  margin-top: 0.1rem;
+}
+
+@media (min-width: 700px) {
+  .atrox-step-hint {
+    display: block;
+  }
+}
+
+/* —— Tareas —— */
+.atrox-tasks {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@media (min-width: 800px) {
+  .atrox-tasks {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.atrox-task-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.85rem;
+  width: 100%;
+  text-align: left;
+  padding: 1.1rem;
+  border: 1px solid var(--ax-border);
+  border-radius: var(--ax-radius);
+  background: var(--ax-bg);
+  min-height: 11rem;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.atrox-task-card:hover:not(:disabled) {
+  border-color: var(--ax-border-strong);
+  background: var(--ax-surface-2);
+}
+
+.atrox-task-card.is-selected {
+  border-color: var(--ax-brand);
+  background: var(--ax-brand-soft);
+}
+
+.atrox-task-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.atrox-task-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.atrox-task-icon {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ax-border);
+  color: var(--ax-muted);
+  background: var(--ax-surface);
+}
+
+.atrox-task-card.is-selected .atrox-task-icon {
+  border-color: var(--ax-brand);
+  color: #f0d4de;
+  background: #2a1520;
+}
+
+.atrox-task-check {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 1px solid var(--ax-border-strong);
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.atrox-task-card.is-selected .atrox-task-check {
+  background: var(--ax-brand);
+  border-color: var(--ax-brand);
+  color: #fff;
+}
+
+.atrox-task-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--ax-border);
+}
+
+.atrox-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.atrox-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--ax-border);
+  background: var(--ax-bg);
+  font-size: 0.72rem;
+  color: var(--ax-text);
+}
+
+.atrox-work-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--ax-gap);
+  align-items: stretch;
+}
+
+@media (min-width: 1100px) {
+  .atrox-work-grid {
+    grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr);
+  }
+}
+
+.atrox-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.atrox-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.atrox-nav-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-weight: 500;
+}
+
+.atrox-nav-item.is-active {
+  background: var(--ax-surface-2);
+  color: var(--ax-text);
+  border-color: var(--ax-border);
+  box-shadow: inset 3px 0 0 0 var(--ax-brand);
+}
+
+.atrox-nav-item:not(.is-active) {
+  color: var(--ax-muted);
+}
+
+.atrox-nav-item:not(.is-active):hover {
+  background: var(--ax-surface-2);
+  color: var(--ax-text);
+}
+
+.atrox-field {
+  display: block;
+  width: 100%;
+  padding: 0.7rem 0.85rem 0.7rem 2.5rem;
+  border: 1px solid var(--ax-border);
+  border-radius: 8px;
+  background: var(--ax-bg);
+  color: var(--ax-text);
+  font-size: 0.95rem;
+}
+
+.atrox-field:focus {
+  outline: none;
+  border-color: var(--ax-brand);
+}
+
+.atrox-field:disabled {
+  opacity: 0.5;
+}
+
+.atrox-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2.5rem 1.25rem;
+  color: var(--ax-muted);
+  font-size: 0.875rem;
+}
+
+.atrox-hero-card {
+  padding: 1.35rem 1.35rem 1.2rem;
+}
+
+.atrox-locked {
+  opacity: 0.55;
+  pointer-events: none;
+  filter: grayscale(0.15);
+}

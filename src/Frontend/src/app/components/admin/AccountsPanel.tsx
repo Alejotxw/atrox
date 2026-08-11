@@ -30,9 +30,9 @@ const STATUS_LABEL: Record<AccountStatus, string> = {
 };
 
 const STATUS_BADGE: Record<AccountStatus, string> = {
-  active: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
-  suspended: 'bg-[#D4AF37]/10 text-[#D4AF37] border-[#D4AF37]/30',
-  deleted: 'bg-red-500/10 text-red-400 border-red-500/30',
+  active: 'bg-[#1a2420] text-[#9aafa3] border-[#3a4a42]',
+  suspended: 'bg-[#2a2418] text-[#c4b08a] border-[#4a4030]',
+  deleted: 'bg-[#24181c] text-[#c49aa6] border-[#4a3038]',
 };
 
 function formatDate(iso: string): string {
@@ -208,7 +208,7 @@ export default function AccountsPanel() {
                               onClick={() => handleReactivate(account)}
                               disabled={actioningId === account.id}
                               title="Reactivar"
-                              className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-all disabled:opacity-50"
+                              className="p-1.5 rounded-md bg-[var(--ax-surface-2)] text-[var(--ax-muted)] border border-[var(--ax-border)] hover:text-[#9aafa3] hover:border-[#3a4a42] transition-colors disabled:opacity-50"
                             >
                               <RotateCcw className="w-3.5 h-3.5" />
                             </button>
@@ -218,7 +218,7 @@ export default function AccountsPanel() {
                               onClick={() => handleDelete(account)}
                               disabled={actioningId === account.id}
                               title="Eliminar"
-                              className="p-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20 transition-all disabled:opacity-50"
+                              className="p-1.5 rounded-md bg-[var(--ax-surface-2)] text-[var(--ax-muted)] border border-[var(--ax-border)] hover:text-[#c49aa6] hover:border-[#4a3038] transition-colors disabled:opacity-50"
                             >
                               {actioningId === account.id ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />

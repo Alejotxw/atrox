@@ -29,6 +29,9 @@ def build_single_provider(name: str, settings: Settings) -> LLMProvider:
             model=settings.llm_model or settings.llm_ollama_model,
             base_url=settings.llm_ollama_base_url,
             timeout_seconds=settings.llm_timeout_seconds,
+            num_predict=settings.llm_ollama_num_predict,
+            num_ctx=settings.llm_ollama_num_ctx,
+            keep_alive=settings.llm_ollama_keep_alive,
         )
     if name == "mock":
         return MockLLMProvider(model=settings.llm_model or "mock-model")

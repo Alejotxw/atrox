@@ -157,11 +157,14 @@ async def get_scan_detail(
 
     assets: list[HostFinding] = []
     all_findings: list[VulnFinding] = []
-    if job.result is not None:
-        if job.job_type == JobType.DISCOVERY:
+    if job.job_type == JobType.DISCOVERY:
+        if job.result is not None:
             assets = [HostFinding(**host) for host in job.result.get("hosts", [])]
-        else:
-            all_findings = [VulnFinding(**finding) for finding in job.result.get("findings", [])]
+    elif job.status in (JobStatus.DONE, JobStatus.FAILED):
+        from atrox.scanner.audit_outcome import resolve_vulnscan_findings
+
+        # CVEs Nuclei, o resultado informativo (superficie Nmap / escaneo negativo).
+        all_findings = resolve_vulnscan_findings(job, queue)
 
     if asset_status is not None:
         assets = [asset for asset in assets if asset.status == asset_status]
@@ -180,6 +183,12 @@ async def get_scan_detail(
     start = (page - 1) * page_size
     page_items = all_findings[start : start + page_size]
 
+    result_error = None
+    if isinstance(job.result, dict):
+        raw_err = job.result.get("error")
+        if isinstance(raw_err, str) and raw_err.strip():
+            result_error = raw_err.strip()
+
     return ScanDetailResponse(
         scan_id=job.id,
         scan_type=job.job_type,
@@ -194,7 +203,7 @@ async def get_scan_detail(
             page_size=page_size,
             total_pages=ceil(total / page_size),
         ),
-        error=job.error,
+        error=job.error or result_error,
         created_at=job.created_at,
         started_at=job.started_at,
         finished_at=job.finished_at,

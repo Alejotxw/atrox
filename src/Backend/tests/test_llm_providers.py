@@ -203,7 +203,10 @@ class TestOllamaProvider:
         assert body["messages"][0]["content"] == "hola prompt"
         assert body["stream"] is False
         assert body["format"] == SCHEMA
+        assert body["keep_alive"] == "10m"
         assert body["options"]["temperature"] == 0
+        assert body["options"]["num_predict"] == 640
+        assert body["options"]["num_ctx"] == 4096
 
     def test_http_error_raises(self) -> None:
         client = make_client(lambda request: httpx.Response(503, text="no"))

@@ -6,6 +6,7 @@ comandos de parcheo y pasos exactos de remediación.
 
 import html
 import io
+import re
 import time
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -21,6 +22,25 @@ from reportlab.platypus import (
 )
 
 from atrox.reports.models import TEMPLATE_VERSION, TechnicalReportData
+
+
+def _split_numbered_steps(text: str | None) -> list[str]:
+    if not text:
+        return []
+    cleaned = text.replace("\r\n", "\n").strip()
+    if not cleaned:
+        return []
+
+    parts = re.split(r"(?=\d+\.\s)", cleaned)
+    steps = []
+    for part in parts:
+        item = part.strip()
+        if not item:
+            continue
+        steps.append(item)
+    if len(steps) == 1:
+        return [cleaned]
+    return steps
 
 
 def _make_technical_page_callback(template_version: str, target: str):
@@ -194,13 +214,15 @@ class TechnicalReportGenerator:
         elements.append(meta_table)
         elements.append(Spacer(1, 10))
 
-        # Resumen del entorno
-        elements.append(Paragraph("1. Resumen Técnico del Entorno", section_heading))
+        # 1. Alcance y metodología
+        elements.append(Paragraph("1. Alcance y metodología", section_heading))
         elements.append(Paragraph(self.data.environment_summary, body_style))
+        elements.append(Paragraph(f"Objetivo evaluado: {self.data.target}", body_style))
+        elements.append(Paragraph("Tipo de prueba: caja negra. Framework base: PTES, OWASP y NIST SP 800-115. Herramientas de apoyo: Nmap y Nuclei.", body_style))
         elements.append(Spacer(1, 8))
 
-        # 2. Lista de Hallazgos Técnicos
-        elements.append(Paragraph("2. Detalles de Vulnerabilidades, PoC y Comandos de Remediación", section_heading))
+        # 2. Hallazgos detallados individuales
+        elements.append(Paragraph("2. Hallazgos detallados individuales", section_heading))
 
         if not self.data.findings:
             elements.append(Paragraph("No se encontraron vulnerabilidades para el objetivo en este escaneo.", body_style))
@@ -211,12 +233,9 @@ class TechnicalReportGenerator:
                 cves_str = ", ".join(item.cve_ids) if item.cve_ids else "Sin CVE asociado"
 
                 finding_elements = []
-
-                # Título del hallazgo
                 finding_header = f"<b>Hallazgo #{item.item_id}: {item.name}</b>"
                 finding_elements.append(Paragraph(finding_header, ParagraphStyle("FHeader", parent=section_heading, fontSize=11, spaceBefore=6, spaceAfter=4)))
 
-                # Tabla de resumen del hallazgo
                 info_table_data = [
                     [
                         Paragraph("<b>Template ID:</b>", body_style),
@@ -227,14 +246,14 @@ class TechnicalReportGenerator:
                     [
                         Paragraph("<b>Activo Afectado:</b>", body_style),
                         Paragraph(item.host, body_style),
-                        Paragraph("<b>Identificadores CVE:</b>", body_style),
-                        Paragraph(f"<font color='#3182CE'>{cves_str}</font>", body_style),
+                        Paragraph("<b>CVSS:</b>", body_style),
+                        Paragraph("[dato no disponible en el escaneo]", body_style),
                     ],
                     [
                         Paragraph("<b>Ubicación Matched:</b>", body_style),
                         Paragraph(item.matched_at or item.host, body_style),
-                        Paragraph("<b>Etiquetas:</b>", body_style),
-                        Paragraph(", ".join(item.tags) if item.tags else "-", body_style),
+                        Paragraph("<b>Identificadores CVE:</b>", body_style),
+                        Paragraph(f"<font color='#3182CE'>{cves_str}</font>", body_style),
                     ],
                 ]
 
@@ -252,37 +271,65 @@ class TechnicalReportGenerator:
                 finding_elements.append(it_table)
                 finding_elements.append(Spacer(1, 4))
 
-                # Descripción
                 if item.description:
-                    finding_elements.append(Paragraph("<b>Descripción Técnica:</b>", body_style))
+                    finding_elements.append(Paragraph("<b>Descripción técnica detallada:</b>", body_style))
                     finding_elements.append(Paragraph(item.description, body_style))
 
-                # Evidencia / PoC (Criterio de Aceptación 1)
                 if item.poc_evidence:
-                    finding_elements.append(Paragraph("<b>Evidencia de Explotación (Proof of Concept - PoC):</b>", body_style))
+                    finding_elements.append(Paragraph("<b>Evidencia / output crudo del escaneo:</b>", body_style))
                     escaped_poc = item.poc_evidence.replace("\n", "<br/>")
                     finding_elements.append(Paragraph(escaped_poc, code_box_style))
 
-                # Pasos de remediación / mitigación
                 if item.remediation_steps:
-                    finding_elements.append(Paragraph("<b>Pasos de Remediación y Mitigación:</b>", body_style))
-                    finding_elements.append(Paragraph(item.remediation_steps, body_style))
+                    finding_elements.append(Paragraph("<b>Pasos de reproducción:</b>", body_style))
+                    for step in _split_numbered_steps(item.remediation_steps):
+                        finding_elements.append(Paragraph(f"{step}", body_style))
 
-                # Comandos de consola
                 if item.remediation_commands:
-                    finding_elements.append(Paragraph("<b>Comandos de Consola para Parcheo/Verificación:</b>", body_style))
+                    finding_elements.append(Paragraph("<b>Comandos de consola para verificación y remediación:</b>", body_style))
                     cmd_block = "<br/>".join([f"$ {cmd}" for cmd in item.remediation_commands])
                     finding_elements.append(Paragraph(cmd_block, code_box_style))
 
-                # Referencias
                 if item.references:
                     refs_str = "<br/>".join([f"• <font color='#3182CE'>{r}</font>" for r in item.references[:3]])
-                    finding_elements.append(Paragraph(f"<b>Referencias y Documentación:</b><br/>{refs_str}", body_style))
+                    finding_elements.append(Paragraph(f"<b>Referencias y documentación:</b><br/>{refs_str}", body_style))
 
                 finding_elements.append(Spacer(1, 10))
                 finding_elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#CBD5E0"), spaceBefore=2, spaceAfter=8))
-
                 elements.append(KeepTogether(finding_elements))
+
+        # 3. Recomendaciones de remediación
+        elements.append(Paragraph("3. Recomendaciones de remediación", section_heading))
+        if self.data.findings:
+            for item in self.data.findings:
+                recommendation = item.remediation_steps or "Aplicar la revisión técnica del componente y validar la mitigación en el entorno objetivo."
+                elements.append(Paragraph(f"• {item.name}: {recommendation}", body_style))
+        else:
+            elements.append(Paragraph("No se requieren acciones inmediatas de corrección porque no se detectaron hallazgos puntuales durante la validación.", body_style))
+        elements.append(Spacer(1, 8))
+
+        # 4. Mapeo a frameworks
+        elements.append(Paragraph("4. Mapeo a frameworks", section_heading))
+        elements.append(Paragraph("OWASP Top 10: [dato no disponible en el escaneo]", body_style))
+        elements.append(Paragraph("MITRE ATT&CK: [dato no disponible en el escaneo]", body_style))
+        elements.append(Paragraph("NIST CSF: [dato no disponible en el escaneo]", body_style))
+        elements.append(Paragraph("CWE: [dato no disponible en el escaneo]", body_style))
+        elements.append(Spacer(1, 8))
+
+        # 5. Conclusiones y próximos pasos
+        elements.append(Paragraph("5. Conclusiones y próximos pasos", section_heading))
+        elements.append(Paragraph("La evidencia disponible no permite afirmar riesgo adicional más allá de los hallazgos del escaneo registrado.", body_style))
+        elements.append(Paragraph("Se recomienda validar cada hallazgo con el responsable del activo y documentar la remediación antes de cerrar la incidencia.", body_style))
+        elements.append(Paragraph("El monitoreo continuo y la revisión posterior de la superficie expuesta son actividades necesarias para mantener la reducción del riesgo.", body_style))
+        elements.append(Spacer(1, 8))
+
+        # 6. Control del documento y anexos
+        elements.append(Paragraph("6. Control del documento y anexos", section_heading))
+        elements.append(Paragraph("Autor: Atrox Pentesting Framework", body_style))
+        elements.append(Paragraph("Revisor: [dato no disponible en el escaneo]", body_style))
+        elements.append(Paragraph("Versión del documento: 1.0", body_style))
+        elements.append(Paragraph("Anexo de logs: [dato no disponible en el escaneo]", body_style))
+        elements.append(Paragraph("Disclaimer: este documento refleja únicamente la evidencia disponible al momento de la ejecución del escaneo y no sustituye una validación forense ni la revisión del impacto de negocio.", body_style))
 
         page_callback = _make_technical_page_callback(self.template_version, self.data.target)
         doc.build(elements, onFirstPage=page_callback, onLaterPages=page_callback)
@@ -312,6 +359,7 @@ class TechnicalReportGenerator:
                 poc_section = f"""
                 <div class="section-block">
                     <h4>Evidencia de Explotación (Proof of Concept - PoC)</h4>
+                    <p><small>Evidencia / output crudo del escaneo</small></p>
                     <pre className="code-block"><code>{html.escape(item.poc_evidence)}</code></pre>
                 </div>
                 """
@@ -321,17 +369,18 @@ class TechnicalReportGenerator:
                 cmds = "\n".join([f"$ {c}" for c in item.remediation_commands])
                 commands_section = f"""
                 <div class="section-block">
-                    <h4>Comandos de Consola para Parcheo/Verificación</h4>
+                    <h4>Comandos de consola para verificación y remediación</h4>
                     <pre className="code-block console"><code>{html.escape(cmds)}</code></pre>
                 </div>
                 """
 
             remediation_section = ""
             if item.remediation_steps:
+                steps_html = "".join(f"<li>{html.escape(step)}</li>" for step in _split_numbered_steps(item.remediation_steps))
                 remediation_section = f"""
                 <div class="section-block">
-                    <h4>Pasos de Remediación y Mitigación</h4>
-                    <p>{html.escape(item.remediation_steps)}</p>
+                    <h4>Pasos de reproducción</h4>
+                    <ol class="section-list">{steps_html}</ol>
                 </div>
                 """
 
@@ -355,11 +404,11 @@ class TechnicalReportGenerator:
                     <div><strong>Template ID:</strong> {html.escape(item.template_id)}</div>
                     <div><strong>Activo Afectado:</strong> {html.escape(item.host)}</div>
                     <div><strong>Ubicación:</strong> {html.escape(item.matched_at or item.host)}</div>
-                    <div><strong>CVEs:</strong> {cves_html}</div>
+                    <div><strong>CVSS:</strong> [dato no disponible en el escaneo]</div>
                     <div className="col-span-2"><strong>Etiquetas:</strong> {tags_html}</div>
                 </div>
                 <div className="section-block">
-                    <h4>Descripción Técnica</h4>
+                    <h4>Descripción técnica detallada</h4>
                     <p>{html.escape(item.description or "Sin descripción detallada.")}</p>
                 </div>
                 {poc_section}
@@ -427,6 +476,14 @@ class TechnicalReportGenerator:
         }}
         .meta-summary div {{
             font-size: 13px;
+        }}
+        .section-list {{
+            margin: 0 0 16px 0;
+            padding-left: 20px;
+        }}
+        .section-list li {{
+            margin-bottom: 8px;
+            color: var(--text-color);
         }}
         .card {{
             background: var(--card-bg);
@@ -537,12 +594,54 @@ class TechnicalReportGenerator:
         </div>
 
         <div class="card">
-            <h3>Resumen Técnico del Entorno</h3>
+            <h3>1. Alcance y metodología</h3>
             <p>{html.escape(self.data.environment_summary)}</p>
+            <p><strong>Tipo de prueba:</strong> caja negra. <strong>Framework base:</strong> PTES, OWASP y NIST SP 800-115.</p>
+            <p><strong>Herramientas:</strong> Nmap y Nuclei.</p>
         </div>
 
-        <h2>Detalle de Vulnerabilidades, Evidencias (PoC) y Mitigación</h2>
-        {"".join(findings_html)}
+        <div class="card">
+            <h3>2. Hallazgos detallados individuales</h3>
+            {"".join(findings_html)}
+        </div>
+
+        <div class="card">
+            <h3>3. Recomendaciones de remediación</h3>
+            <ol class="section-list">
+                {''.join(f'<li>{html.escape(item.name)}: {html.escape(item.remediation_steps or "Aplicar la revisión técnica del componente y validar la mitigación en el entorno objetivo.")}</li>' for item in self.data.findings)}
+            </ol>
+        </div>
+
+        <div class="card">
+            <h3>4. Mapeo a frameworks</h3>
+            <ul class="section-list">
+                <li>OWASP Top 10: [dato no disponible en el escaneo]</li>
+                <li>MITRE ATT&CK: [dato no disponible en el escaneo]</li>
+                <li>NIST CSF: [dato no disponible en el escaneo]</li>
+                <li>CWE: [dato no disponible en el escaneo]</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h3>5. Conclusiones y próximos pasos</h3>
+            <ul class="section-list">
+                <li>La evidencia disponible no permite afirmar riesgo adicional más allá de los hallazgos del escaneo registrado.</li>
+                <li>Se recomienda validar cada hallazgo con el responsable del activo y documentar la remediación antes de cerrar la incidencia.</li>
+                <li>ATROX — Reporte Técnico de Remediación | Objetivo: {html.escape(self.data.target)}</li>
+                <li>El monitoreo continuo y la revisión posterior de la superficie expuesta son actividades necesarias para mantener la reducción del riesgo.</li>
+            </ul>
+        </div>
+
+        <div class="card">
+            <h3>6. Control del documento y anexos</h3>
+            <ul class="section-list">
+                <li>Autor: Atrox Pentesting Framework</li>
+                <li>Revisor: [dato no disponible en el escaneo]</li>
+                <li>Versión del documento: 1.0</li>
+                <li>Anexo de logs: [dato no disponible en el escaneo]</li>
+                <li>Disclaimer: este documento refleja únicamente la evidencia disponible al momento de la ejecución del escaneo y no sustituye una validación forense ni la revisión del impacto de negocio.</li>
+            </ul>
+        </div>
 
         <div class="footer">
             <div>CONFIDENCIAL — Reporte Técnico para SysAdmins | Atrox Framework</div>

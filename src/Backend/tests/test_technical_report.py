@@ -193,6 +193,58 @@ class TestTechnicalReportApi:
         finally:
             app.dependency_overrides.pop(require_mfa_admin, None)
 
+    def test_get_technical_report_json_success(self):
+        app.dependency_overrides[require_mfa_admin] = lambda: {"username": "sysadmin"}
+        try:
+            with TestClient(app) as client:
+                scan_id = uuid4()
+                job = Job(
+                    id=scan_id,
+                    job_type=JobType.VULNSCAN,
+                    params={"target": "10.0.0.5", "port_range": "80,443"},
+                    status=JobStatus.DONE,
+                    result={
+                        "findings": [
+                            {
+                                "template_id": "http-missing-security-headers",
+                                "name": "Headers de seguridad ausentes",
+                                "severity": "medium",
+                                "host": "10.0.0.5",
+                                "matched_at": "https://10.0.0.5/",
+                                "tags": ["web"],
+                                "description": "El servidor no responde con cabeceras de seguridad minimamente recomendadas.",
+                                "references": [],
+                                "extracted_results": ["X-Frame-Options no presente"],
+                                "scan_type": "vulnscan",
+                                "ip": "10.0.0.5",
+                                "timestamp": "2026-08-04T00:00:00Z",
+                            }
+                        ]
+                    },
+                )
+                app.state.job_queue._jobs[scan_id] = job
+
+                response = client.get(
+                    f"/api/reports/technical/{scan_id}?format=json",
+                    headers={"Authorization": "Bearer test-token"},
+                )
+                assert response.status_code == 200
+                assert response.headers["content-type"].startswith("application/json")
+                payload = response.json()
+                assert payload["portada"]["objetivo"] == "10.0.0.5"
+                assert payload["portada"]["id_evaluacion"] == str(scan_id)
+                assert payload["alcance"]["tipo_prueba"] == "caja negra"
+                assert payload["alcance"]["metodologia"]
+                assert payload["hallazgos"][0]["severidad"] == "MEDIA"
+                assert payload["hallazgos"][0]["cvss_score"] == "[dato no disponible en el escaneo]"
+                assert payload["hallazgos"][0]["pasos_reproduccion"]
+                assert "headers" in payload["hallazgos"][0]["recomendacion"].lower()
+                assert set(payload["mapeo_frameworks"]).issuperset({"owasp_top10", "mitre_attack", "nist_csf", "cwe"})
+                assert payload["conclusiones"]
+                assert payload["anexos"]["control_documento"]
+        finally:
+            app.dependency_overrides.pop(require_mfa_admin, None)
+
     def test_post_custom_technical_report(self, sample_technical_report_data):
         app.dependency_overrides[require_mfa_admin] = lambda: {"username": "sysadmin"}
         try:

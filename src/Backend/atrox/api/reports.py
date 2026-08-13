@@ -16,11 +16,13 @@ import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 
 from atrox.api.jobs import get_job_queue
 from atrox.persistence.deps import get_persistence
 from atrox.persistence.models import ReportCreate, ReportRecord
 from atrox.persistence.service import EncryptedPersistenceService
+from atrox.queue.models import Job
 from atrox.queue.service import JobQueue
 from atrox.reports.generator import ExecutiveReportGenerator
 from atrox.reports.models import ExecutiveReportData, SeverityHeatmap, TechnicalFindingItem, TechnicalReportData, TopRiskItem
@@ -148,6 +150,242 @@ def _generate_technical_finding_details(finding: VulnFinding, index: int) -> Tec
         remediation_commands=remediation_commands,
         references=finding.references,
     )
+
+
+_MISSING_DATA = "[dato no disponible en el escaneo]"
+
+
+def _as_report_text(value: str | None, fallback: str = _MISSING_DATA) -> str:
+    if value is None:
+        return fallback
+    cleaned = str(value).strip()
+    return cleaned if cleaned else fallback
+
+
+def _severity_to_report(value: str | None) -> str:
+    key = (value or "").lower()
+    return {
+        "critical": "CRITICA",
+        "high": "ALTA",
+        "medium": "MEDIA",
+        "low": "BAJA",
+        "info": "INFORMATIVA",
+        "informative": "INFORMATIVA",
+        "unknown": "INFORMATIVA",
+    }.get(key, "INFORMATIVA")
+
+
+def _risk_level_from_counts(counts: dict[str, int]) -> str:
+    if counts["critica"] > 0:
+        return "CRITICO"
+    if counts["alta"] > 0:
+        return "ALTO"
+    if counts["media"] > 0:
+        return "MEDIO"
+    if counts["baja"] > 0:
+        return "BAJO"
+    return "INFORMATIVO"
+
+
+def _build_atrox_json_report(target: str, scan_id: str, findings: list[VulnFinding], *, job: Job | None = None) -> dict:
+    counts = {"critica": 0, "alta": 0, "media": 0, "baja": 0, "informativa": 0}
+    for finding in findings:
+        sev = _severity_to_report(getattr(finding, "severity", None))
+        if sev == "CRITICA":
+            counts["critica"] += 1
+        elif sev == "ALTA":
+            counts["alta"] += 1
+        elif sev == "MEDIA":
+            counts["media"] += 1
+        elif sev == "BAJA":
+            counts["baja"] += 1
+        else:
+            counts["informativa"] += 1
+
+    objective = _as_report_text(target)
+    date_exec = getattr(job, "created_at", None) or getattr(job, "finished_at", None) or _MISSING_DATA
+    report_date = _MISSING_DATA if date_exec == _MISSING_DATA else str(date_exec)
+
+    port_range = None
+    templates = None
+    if job and getattr(job, "params", None):
+        port_range = job.params.get("port_range")
+        templates = job.params.get("templates")
+
+    total_findings = len(findings)
+    summary_text = (
+        "Durante esta evaluación no se observaron indicadores con impacto directo para la operación. "
+        "Se recomienda continuar con monitoreo, validación y revisión periódica de la superficie expuesta."
+        if total_findings == 0
+        else (
+            f"La evaluación reveló {total_findings} hallazgo(s) relevantes para el activo objetivo. "
+            "Se identificaron condiciones que requieren atención prioritaria de seguridad y una revisión operativa o técnica inmediata."
+        )
+    )
+
+    def _framework_values(prefix: str) -> list[str]:
+        values: list[str] = []
+        for finding in findings:
+            tags = getattr(finding, "tags", None) or []
+            for tag in tags:
+                if isinstance(tag, str):
+                    value = tag.strip()
+                    if value and value.upper().startswith(prefix.upper()):
+                        values.append(value)
+        return values or [_MISSING_DATA]
+
+    def _finding_recommendation(finding: VulnFinding) -> str:
+        title = (getattr(finding, "name", None) or "").lower()
+        template = (getattr(finding, "template_id", None) or "").lower()
+        host = getattr(finding, "host", None) or _MISSING_DATA
+        if "header" in title or "cabecera" in title or "security headers" in title:
+            return (
+                f"Habilitar las cabeceras HTTP / headers recomendadas en {host} (por ejemplo: Content-Security-Policy, "
+                "X-Frame-Options, X-Content-Type-Options y Referrer-Policy) y validar la respuesta final del servicio."
+            )
+        if "credential" in title or "credencial" in title or "default" in title:
+            return (
+                f"Revisar y rotar credenciales del servicio asociado a {host}; deshabilitar usuarios por defecto y reforzar autenticación con permisos mínimos."
+            )
+        if "tls" in title or "ssl" in title or "cert" in title:
+            return (
+                f"Corregir la configuración TLS/SSL del servicio de {host} y validar la cadena, versión y certificados antes de reabrir la exposición."
+            )
+        if "http" in template or "http" in title or "apache" in title or "nginx" in title:
+            return (
+                f"Revisar la configuración del servicio web en {host}, limitar rutas no autorizadas y aplicar el parche de la versión afectada."
+            )
+        return (
+            f"Aplicar la revisión técnica del componente afectado en {host}, remediar la causa raíz del hallazgo y ejecutar una validación posterior del servicio."
+        )
+
+    def _finding_reproduction_steps(finding: VulnFinding) -> list[str]:
+        host = getattr(finding, "host", None) or _MISSING_DATA
+        matched_at = getattr(finding, "matched_at", None) or _MISSING_DATA
+        evidence = (
+            "\n".join((getattr(finding, "extracted_results", None) or [])[:5])
+            if getattr(finding, "extracted_results", None)
+            else _MISSING_DATA
+        )
+        return [
+            f"1. Acceder al objetivo identificado: {host}.",
+            f"2. Ejecutar la comprobación asociada a la ruta o endpoint detectado: {matched_at}.",
+            f"3. Confirmar la salida de la validación: {evidence}.",
+            "4. Registrar si el comportamiento persiste tras la remediación y cerrar la incidencia en la evidencia de validación.",
+        ]
+
+    hallazgos = []
+    for index, finding in enumerate(findings, start=1):
+        severity = _severity_to_report(getattr(finding, "severity", None))
+        desc = _as_report_text(getattr(finding, "description", None), _MISSING_DATA)
+        title = _as_report_text(getattr(finding, "name", None), _MISSING_DATA)
+        host = _as_report_text(getattr(finding, "host", None), _MISSING_DATA)
+        references = [
+            item for item in (getattr(finding, "references", None) or []) if str(item).strip()
+        ] or [_MISSING_DATA]
+        cwe = _MISSING_DATA
+        for tag in (getattr(finding, "tags", None) or []):
+            if isinstance(tag, str) and tag.upper().startswith("CWE-"):
+                cwe = tag.upper()
+                break
+        raw_evidence = "\n".join((getattr(finding, "extracted_results", None) or [])[:5])
+        evidence = _as_report_text(raw_evidence, _MISSING_DATA)
+        hallazgos.append(
+            {
+                "id": _as_report_text(getattr(finding, "template_id", None), f"scan-{index}"),
+                "titulo": title,
+                "severidad": severity,
+                "cvss_score": _MISSING_DATA,
+                "cvss_vector": _MISSING_DATA,
+                "cwe": cwe,
+                "host": host,
+                "ruta_afectada": _as_report_text(getattr(finding, "matched_at", None), _MISSING_DATA),
+                "descripcion": desc,
+                "impacto": desc,
+                "evidencia": evidence,
+                "pasos_reproduccion": _finding_reproduction_steps(finding),
+                "recomendacion": _finding_recommendation(finding),
+                "referencias": references,
+                "mitigacion": "Aplicar la corrección técnica específica del componente afectado y validar la ausencia del comportamiento con pruebas posteriores.",
+                "estado": "detectado",
+            }
+        )
+
+    framework_mapping = {
+        "owasp_top10": _framework_values("owasp"),
+        "mitre_attack": _framework_values("attack"),
+        "nist_csf": _framework_values("nist"),
+        "cwe": _framework_values("cwe"),
+    }
+
+    report = {
+        "portada": {
+            "objetivo": objective,
+            "id_evaluacion": str(scan_id),
+            "tipo_prueba": "caja negra",
+            "framework": "Atrox Pentesting Framework",
+            "fecha_ejecucion": str(date_exec),
+            "fecha_emision": str(report_date),
+            "audiencia": "Dirección de seguridad y liderazgo técnico",
+            "nivel_riesgo_global": _risk_level_from_counts(counts),
+        },
+        "resumen_ejecutivo": {
+            "texto": summary_text,
+            "distribucion_severidad": {
+                "critica": counts["critica"],
+                "alta": counts["alta"],
+                "media": counts["media"],
+                "baja": counts["baja"],
+                "informativa": counts["informativa"],
+            },
+        },
+        "alcance": {
+            "tipo_prueba": "caja negra",
+            "metodologia": (
+                "La evaluación se ejecutó con recolección de activos, validación de puertos y análisis de vulnerabilidades usando "
+                "descubrimiento activo y pruebas de seguridad orientadas a la superficie expuesta."
+            ),
+            "frameworks": ["PTES", "OWASP", "NIST SP 800-115"],
+            "in_scope": [objective],
+            "out_of_scope": [_MISSING_DATA],
+            "ventana_ejecucion": _as_report_text(port_range, _MISSING_DATA),
+            "estandares_seguidos": ["OWASP Testing Guide", "NIST SP 800-115"],
+            "herramientas": [
+                {
+                    "nombre": "Nmap",
+                    "proposito": "Descubrimiento de activos y puertos",
+                    "config": _as_report_text(port_range, _MISSING_DATA),
+                },
+                {
+                    "nombre": "Nuclei",
+                    "proposito": "Escaneo de vulnerabilidades",
+                    "config": _as_report_text(templates, _MISSING_DATA),
+                },
+            ],
+        },
+        "hallazgos": hallazgos,
+        "mapeo_frameworks": framework_mapping,
+        "conclusiones": [
+            "La superficie evaluada requiere revisión técnica y priorización de correcciones según la criticidad observada.",
+            "Los hallazgos detectados deben validarse con el responsable del activo antes de cerrar la prueba y documentar la remediación.",
+            "La continuidad del monitoreo, la gestión de cambios y la validación posterior son necesarias para verificar la reducción del riesgo.",
+        ],
+        "anexos": {
+            "observaciones": [
+                "La evidencia reportada proviene exclusivamente de los resultados del escaneo suministrado.",
+                "Si no se disponía de un dato específico, se registró el marcador estándar del sistema para evitar información inventada.",
+            ],
+            "control_documento": {
+                "autor": "Atrox Pentesting Framework",
+                "revisor": _MISSING_DATA,
+                "version": "1.0",
+                "disclaimer": "Este documento refleja únicamente la evidencia disponible al momento de la ejecución del escaneo y no sustituye una evaluación forense ni un análisis de impacto de negocio completo.",
+            },
+            "archivos": [_MISSING_DATA],
+            "logs": [_MISSING_DATA],
+        },
+    }
+    return report
 
 
 @router.get("/executive/{scan_id}", response_class=Response)
@@ -290,7 +528,7 @@ async def generate_custom_executive_report_pdf(
 async def export_technical_report(
     scan_id: UUID,
     request: Request,
-    format: str = Query(default="pdf", pattern="^(pdf|html)$", description="Formato del reporte: pdf o html"),
+    format: str = Query(default="pdf", pattern="^(pdf|html|json)$", description="Formato del reporte: pdf, html o json"),
     queue: JobQueue = Depends(get_job_queue),
     user_info: dict = Depends(require_mfa_admin),
 ) -> Response:
@@ -342,6 +580,10 @@ async def export_technical_report(
             },
         )
 
+    if format.lower() == "json":
+        payload = _build_atrox_json_report(target, str(scan_id), findings, job=job)
+        return JSONResponse(content=payload)
+
     pdf_bytes = generator.generate_pdf()
     filename = f"reporte_tecnico_{scan_id}.pdf"
     return Response(
@@ -358,7 +600,7 @@ async def export_technical_report(
 async def generate_custom_technical_report(
     body: TechnicalReportData,
     request: Request,
-    format: str = Query(default="pdf", pattern="^(pdf|html)$"),
+    format: str = Query(default="pdf", pattern="^(pdf|html|json)$"),
     user_info: dict = Depends(require_mfa_admin),
 ) -> Response:
     """Genera un reporte técnico en PDF o HTML a partir de datos explícitos (HU-024)."""
@@ -383,6 +625,28 @@ async def generate_custom_technical_report(
                 "X-Report-Template-Version": body.template_version,
             },
         )
+
+    if format.lower() == "json":
+        lenses = []
+        for item in body.findings:
+            lenses.append(
+                VulnFinding(
+                    template_id=item.template_id,
+                    name=item.name,
+                    severity=item.severity.lower() if item.severity else "info",
+                    host=item.host,
+                    matched_at=item.matched_at,
+                    tags=item.tags,
+                    description=item.description,
+                    references=item.references,
+                    extracted_results=[item.poc_evidence],
+                    scan_type=body.scan_type,
+                    ip=item.host,
+                    timestamp=body.generated_at,
+                )
+            )
+        payload = _build_atrox_json_report(body.target, body.scan_id, lenses, job=None)
+        return JSONResponse(content=payload)
 
     pdf_bytes = generator.generate_pdf()
     return Response(

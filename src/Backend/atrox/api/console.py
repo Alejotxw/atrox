@@ -8,30 +8,10 @@ from typing import AsyncIterator
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
 
 from atrox.console.bus import ScanLogBus, get_scan_log_bus
-from atrox.console.models import LogSeverity
-from atrox.console.simulator import run_simulated_scan
-from atrox.scanner.validators import validate_target
 
 router = APIRouter(prefix="/api/console", tags=["console"])
-
-
-class SimulateRequest(BaseModel):
-    """Payload para demo simulada de logs en vivo."""
-
-    target: str = Field(default="lab.local", min_length=1, max_length=253)
-
-    @field_validator("target")
-    @classmethod
-    def check_target(cls, value: str) -> str:
-        return validate_target(value)
-
-
-class SimulateResponse(BaseModel):
-    status: str
-    target: str
 
 
 def get_console_bus(request: Request) -> ScanLogBus:
@@ -83,19 +63,3 @@ async def stream_console_logs(request: Request) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@router.post("/simulate", response_model=SimulateResponse, status_code=202)
-async def simulate_console_scan(
-    body: SimulateRequest,
-    request: Request,
-) -> SimulateResponse:
-    """Arranca una demo simulada que emite logs por el stream SSE (DoD HU-020)."""
-    bus = get_console_bus(request)
-    await bus.emit(
-        "INFO",
-        f"Simulated scan requested for {body.target}",
-        severity=LogSeverity.INFO,
-    )
-    asyncio.create_task(run_simulated_scan(bus, body.target))
-    return SimulateResponse(status="started", target=body.target)

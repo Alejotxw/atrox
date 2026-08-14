@@ -11,15 +11,18 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from atrox.ai.agents.chat.models import LLMChatPayload
 from atrox.ai.agents.payloads.models import PayloadGenerationResult
 from atrox.ai.agents.scoring.models import ConfidenceScoreResult
-from atrox.ai.agents.vectors.models import VectorAnalysisResult
+from atrox.ai.agents.vectors.models import AttackVectorLLMPayload, VectorAnalysisResult
 from atrox.ai.schemas.errors import UnknownOutputKindError
 
 LLM_OUTPUT_MODELS: dict[str, type[BaseModel]] = {
     "vectors": VectorAnalysisResult,
+    "vector_narrative": AttackVectorLLMPayload,
     "payloads": PayloadGenerationResult,
     "scores": ConfidenceScoreResult,
+    "chat": LLMChatPayload,
 }
 
 SUPPORTED_KINDS: frozenset[str] = frozenset(LLM_OUTPUT_MODELS)

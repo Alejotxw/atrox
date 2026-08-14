@@ -130,6 +130,35 @@ class MfaService:
         if username in self._lockout_data:
             self._lockout_data[username] = {"attempts": 0, "lockout_until": None}
 
+    def record_login_failure(self, username: str) -> None:
+        """Registra un intento fallido para cuentas regulares (login sin TOTP)."""
+        self._record_failure(username)
+
+    def record_login_success(self, username: str) -> None:
+        """Limpia el contador de intentos fallidos tras un login exitoso sin TOTP."""
+        self._record_success(username)
+
+    def _create_session(self, username: str) -> str:
+        """Crea y registra una sesión activa — único punto que escribe en `_active_sessions`."""
+        session_token = f"session_{secrets.token_urlsafe(32)}"
+        now = time.time()
+        self._active_sessions[session_token] = {
+            "username": username,
+            "created_at": now,
+            "expires_at": now + (self.session_ttl_minutes * 60),
+        }
+        return session_token
+
+    def create_direct_session(self, username: str) -> str:
+        """Crea una sesión activa sin pasar por el segundo factor TOTP.
+
+        Usado por cuentas regulares (creadas al aprobar una solicitud de
+        acceso): comparten el mismo pool de sesiones que el sysadmin, así
+        `validate_session`/`revoke_session` y todos los endpoints protegidos
+        con `require_mfa_admin` funcionan igual sin duplicar lógica.
+        """
+        return self._create_session(username)
+
     def authenticate_primary(self, username: str, password: str) -> tuple[bool, bool, str | None]:
         """Paso 1: autenticación de usuario y clave.
         Retorna: (exito, locked_out, mfa_token_o_mensaje_error)
@@ -176,13 +205,7 @@ class MfaService:
         del self._pending_mfa_tokens[mfa_token]
         self._record_success(username)
 
-        session_token = f"session_{secrets.token_urlsafe(32)}"
-        now = time.time()
-        self._active_sessions[session_token] = {
-            "username": username,
-            "created_at": now,
-            "expires_at": now + (self.session_ttl_minutes * 60),
-        }
+        session_token = self._create_session(username)
         return True, False, session_token
 
     def validate_session(self, session_token: str) -> dict | None:
@@ -211,3 +234,16 @@ class MfaService:
             del self._active_sessions[session_token]
             return True
         return False
+
+    def revoke_sessions_for_username(self, username: str) -> int:
+        """Revoca todas las sesiones activas de un usuario (ej. al suspender/eliminar su cuenta).
+
+        Sin esto, una cuenta suspendida/eliminada seguiría autenticada con
+        una sesión ya emitida hasta que expire por tiempo (`session_ttl_minutes`).
+        """
+        tokens_to_revoke = [
+            token for token, session in self._active_sessions.items() if session["username"] == username
+        ]
+        for token in tokens_to_revoke:
+            del self._active_sessions[token]
+        return len(tokens_to_revoke)

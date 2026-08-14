@@ -1,4 +1,5 @@
 import asyncio
+import sys
 
 import pytest
 
@@ -56,6 +57,31 @@ def test_scan_parses_open_ports_from_mocked_nmap() -> None:
     assert http_port.version == "Apache httpd 2.4.52"
 
 
+def test_scan_invokes_on_command_with_real_args_before_running() -> None:
+    async def mock_runner(_args: list[str]) -> tuple[int, str, str]:
+        return 0, SAMPLE_NMAP_XML_UP, ""
+
+    captured: list[list[str]] = []
+
+    async def on_command(args: list[str]) -> None:
+        captured.append(args)
+
+    wrapper = NmapWrapper(
+        nmap_path="nmap",
+        runner=mock_runner,
+        on_command=on_command,
+    )
+
+    asyncio.run(wrapper.scan("192.168.1.10", "22,80,443"))
+
+    assert len(captured) == 1
+    command = captured[0]
+    assert command[0] == "nmap"
+    assert "-p" in command
+    assert "22,80,443" in command
+    assert "192.168.1.10" in command
+
+
 def test_scan_handles_unreachable_target_without_crash() -> None:
     async def mock_runner(_args: list[str]) -> tuple[int, str, str]:
         return 0, SAMPLE_NMAP_XML_DOWN, ""
@@ -106,3 +132,35 @@ def test_scan_handles_empty_output() -> None:
 
     assert result.status == ScanStatus.ERROR
     assert result.error is not None
+
+
+class TestRealSubprocessPath:
+    """Sin `runner` inyectado: usa subprocess.Popen bloqueante en un hilo del
+    executor (no asyncio.create_subprocess_exec) — funciona incluso bajo
+    SelectorEventLoop, el loop que uvicorn usa en Windows con --reload."""
+
+    def test_execute_runs_real_subprocess_and_captures_output(self) -> None:
+        wrapper = NmapWrapper(nmap_path=sys.executable, timeout_seconds=5)
+
+        return_code, stdout, stderr = asyncio.run(
+            wrapper._execute(["-c", "import sys; print('ok'); sys.exit(0)"])
+        )
+
+        assert return_code == 0
+        assert "ok" in stdout
+
+    def test_execute_raises_file_not_found_for_missing_binary(self) -> None:
+        wrapper = NmapWrapper(
+            nmap_path="definitely-not-a-real-binary-xyz123", timeout_seconds=5
+        )
+
+        with pytest.raises(FileNotFoundError):
+            asyncio.run(wrapper._execute(["--version"]))
+
+    def test_execute_raises_timeout_error_when_process_hangs(self) -> None:
+        wrapper = NmapWrapper(nmap_path=sys.executable, timeout_seconds=1)
+
+        with pytest.raises(asyncio.TimeoutError):
+            asyncio.run(
+                wrapper._execute(["-c", "import time; time.sleep(5)"])
+            )

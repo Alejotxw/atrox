@@ -12,6 +12,12 @@ def get_nuclei_wrapper(settings: Settings = Depends(get_settings)) -> NucleiWrap
         nuclei_path=settings.nuclei_path,
         timeout_seconds=settings.nuclei_timeout_seconds,
         sandbox_templates=settings.nuclei_sandbox_templates,
+        docker_image=settings.nuclei_docker_image,
+        docker_templates_volume=settings.nuclei_docker_templates_volume,
+        concurrency=settings.nuclei_concurrency,
+        request_timeout_seconds=settings.nuclei_request_timeout_seconds,
+        retries=settings.nuclei_retries,
+        exclude_tags=settings.nuclei_exclude_tags,
     )
 
 

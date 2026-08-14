@@ -11,6 +11,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     app_name: str = "Atrox API"
@@ -26,8 +27,38 @@ class Settings(BaseSettings):
     nmap_path: str = "nmap"
     nmap_timeout_seconds: int = 300
     nuclei_path: str = "nuclei"
-    nuclei_timeout_seconds: int = 300
+    # 480s (8min) da margen para la primera corrida antes de que el volumen
+    # de plantillas esté "caliente" — con el volumen ya poblado, escaneos
+    # posteriores terminan en una fracción de este tiempo.
+    nuclei_timeout_seconds: int = 480
     nuclei_sandbox_templates: str | None = None
+    # Si se define, Nuclei corre vía `docker run --rm -i <imagen>` en vez del
+    # binario nativo (ej. "projectdiscovery/nuclei:latest") — útil cuando un
+    # antivirus bloquea el ejecutable nativo de Nuclei en Windows.
+    nuclei_docker_image: str | None = None
+    # Volumen con nombre donde persiste nuclei-templates entre ejecuciones en
+    # modo Docker — sin esto, cada contenedor `--rm` re-descarga el catálogo
+    # completo (varios minutos) en cada escaneo. None desactiva el montaje.
+    nuclei_docker_templates_volume: str | None = "atrox-nuclei-templates"
+    # Workers de plantillas en paralelo (flag -c). El default propio de
+    # Nuclei (25) es conservador: contra un objetivo con muchos puertos
+    # cerrados/lentos, el tiempo total escala con la cola de plantillas
+    # pendientes más que con el ancho de banda disponible.
+    nuclei_concurrency: int = 50
+    # Timeout por request individual en segundos (flag -timeout, default de
+    # Nuclei: 10s). Bajarlo evita que un puerto/endpoint colgado consuma
+    # minutos del presupuesto total del escaneo mientras Nuclei reintenta
+    # plantilla por plantilla contra el mismo host caído.
+    nuclei_request_timeout_seconds: int = 5
+    # Reintentos por plantilla fallida (flag -retries, default de Nuclei: 1).
+    # En 0 se evita duplicar el tiempo gastado contra objetivos que no
+    # responden — la primera falla ya es suficiente señal.
+    nuclei_retries: int = 0
+    # Tags excluidos del catálogo (flag -etags). "dos" cubre plantillas que
+    # intencionalmente envían payloads pesados/repetidos para verificar
+    # condiciones de denegación de servicio — no corresponden en una
+    # auditoría automatizada y además son las más lentas del catálogo.
+    nuclei_exclude_tags: list[str] = ["dos"]
 
     # Cola de trabajos (HU-004)
     max_concurrent_scans: int = 10
@@ -49,6 +80,14 @@ class Settings(BaseSettings):
     # Marcado manual de falsos positivos (HU-022)
     false_positive_store_path: str = "data/false_positives.jsonl"
 
+    # Solicitudes de acceso desde la landing page pre-login. Sin envío de
+    # correo (no hay SMTP configurado en el proyecto): el administrador las
+    # revisa vía GET /api/access-requests.
+    access_request_store_path: str = "data/access_requests.jsonl"
+
+    # Cuentas de usuario creadas al aprobar una solicitud de acceso
+    account_store_path: str = "data/accounts.jsonl"
+
     # Validación estructurada de respuestas IA (HU-017 / ADR-002)
     llm_validation_max_retries: int = 1
     llm_rejection_log_path: str | None = None
@@ -58,10 +97,15 @@ class Settings(BaseSettings):
     llm_provider: str = "mock"
     llm_model: str | None = None
     llm_api_key: str | None = None
-    llm_timeout_seconds: int = 30
+    # Modelos locales suelen necesitar más de 30s; 180s evita cortar el pentest.
+    llm_timeout_seconds: int = 180
     llm_gemini_model: str = "gemini-2.0-flash"
     llm_ollama_base_url: str = "http://localhost:11434"
     llm_ollama_model: str = "llama3"
+    # Límites de generación Ollama (menos tokens = respuesta más rápida).
+    llm_ollama_num_predict: int = 640
+    llm_ollama_num_ctx: int = 4096
+    llm_ollama_keep_alive: str = "10m"
     llm_fallback_providers: list[str] = []
 
     # Sincronización diaria de base de amenazas NVD (HU-005 / RF-010)

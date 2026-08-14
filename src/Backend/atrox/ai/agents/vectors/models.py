@@ -18,6 +18,16 @@ class AttackVector(BaseModel):
     estimated_impact: str
 
 
+class AttackVectorLLMPayload(BaseModel):
+    """Esquema exacto que debe cumplir la respuesta cruda del LLM real
+    (Ollama/Gemini) al pedir análisis de vectores de ataque — ver
+    `atrox/ai/agents/vectors/llm_analyzer.py`. Solo pide los vectores; los
+    campos agregados (total_findings, analysis_time_ms, within_sla) los
+    calcula el servidor, no el LLM."""
+
+    vectors: list[AttackVector]
+
+
 class VectorAnalysisRequest(BaseModel):
     findings: list[VulnFinding] = Field(..., max_length=10)
 
@@ -27,3 +37,10 @@ class VectorAnalysisResult(BaseModel):
     total_findings: int
     analysis_time_ms: float
     within_sla: bool = Field(description="True si analysis_time_ms < 5000 (RNF-004)")
+    source: str = Field(
+        default="heuristic",
+        description="'llm' si un modelo de IA real generó el análisis, 'heuristic' si fue el motor de reglas (fallback)",
+    )
+    model_used: str | None = Field(
+        default=None, description="Nombre del modelo LLM que respondió, si source='llm'"
+    )

@@ -37,12 +37,13 @@ npm run test:watch  # vitest en modo watch
 
 ## Dashboard de KPIs (HU-019)
 
-Panel superior del tab **Dashboard** (`src/app/pages/Dashboard.tsx`):
+Panel superior del tab **Dashboard**, integrado directamente en `src/app/App.tsx` (antes vivía en `src/app/pages/Dashboard.tsx`, eliminado para no duplicar la fila de métricas con datos hardcodeados que existía por separado):
 
-- KPIs: activos descubiertos, puertos/servicios, vulnerabilidades críticas, escaneos activos
+- KPIs con datos reales: hosts descubiertos, puertos/servicios, vulnerabilidades críticas (vía `fetchDashboardKpis` en `lib/dashboardMetrics.ts`)
 - Datos desde `GET /api/jobs` + `GET /api/scans/{id}` (HU-010)
 - Polling cada 5 s sin recargar la página
 - Grid responsive desktop: 1 → 2 → 4 columnas
+- La 4ª tarjeta ("Estado del Reporte") es local al flujo de "Iniciar Auditoría Automatizada" (Iniciando/Completado/Error), no proviene del polling de KPIs
 
 Documentación Lighthouse: [`docs/Frontend/HU-019-lighthouse.md`](../../docs/Frontend/HU-019-lighthouse.md)
 
@@ -54,11 +55,12 @@ npm run test -- dashboardMetrics
 
 Componente `src/app/components/ScanConsole/ScanConsole.tsx` en el Dashboard:
 
-- Stream SSE: `GET /api/console/stream` (timestamp, módulo, severidad)
-- Demo: `POST /api/console/simulate` al pulsar **Iniciar Auditoría Automatizada**
+- Stream SSE: `GET /api/console/stream` (timestamp, módulo, severidad) — sin demo simulada, todo el contenido proviene de jobs reales.
+- Al enviar un job real (`POST /api/jobs`, disparado por **Iniciar Auditoría Automatizada**), la cola (`atrox/queue/service.py`) emite el ciclo de vida: encolado → iniciado → completado/fallido.
+- El dispatcher (`atrox/main.py::_dispatch_scan`) enriquece esos eventos con detalle real del resultado: para discovery (Nmap), un resumen de hosts activos y puertos abiertos; para vulnscan (Nuclei), una línea por cada hallazgo `CRITICAL`/`HIGH` con su plantilla y host.
+- Al cambiar `auditToken` (nueva auditoría), la consola se limpia visualmente — no dispara ninguna llamada HTTP adicional.
 - Auto-scroll configurable (checkbox en el header)
 - Reconexión automática si cae el EventSource
-- Los jobs reales (`POST /api/jobs`) también emiten líneas de ciclo de vida al mismo bus
 
 ```bash
 npm run test -- scanConsole

@@ -226,8 +226,23 @@ class ExecutiveReportGenerator:
 
         # 3. Heatmap de Severidad (Criterio de Aceptación 2)
         elements.append(Paragraph("2. Heatmap y Distribución de Severidad", section_heading))
-        
+
         hp = self.data.heatmap
+        if hp.total > 0:
+            context_text = (
+                "El mapa de severidad refleja cómo se concentra la exposición del activo: "
+                "si los hallazgos críticos y altos representan una parte significativa, la superficie de riesgo "
+                "se interpreta como de impacto inmediato sobre confididencialidad, integridad y disponibilidad. "
+                "La proporción de niveles medios y bajos ayuda a comprender si la amenaza es puntual o si existe "
+                "una base técnica más amplia que requiere priorización y control operativo."
+            )
+        else:
+            context_text = (
+                "La distribución de severidad se reporta en cero porque no se registraron hallazgos durante esta "
+                "validación; en ese escenario el riesgo aparente es bajo y la atención debe centrarse en la vigilancia "
+                "continua del activo y en la validación de la cobertura de escaneo."
+            )
+
         heatmap_data = [
             [
                 Paragraph("Nivel de Severidad", table_header_style),
@@ -287,6 +302,8 @@ class ExecutiveReportGenerator:
             )
         )
         elements.append(heatmap_table)
+        elements.append(Paragraph("Contexto de la distribución:", ParagraphStyle("ContextLabel", parent=body_style, fontName="Helvetica-Bold", spaceBefore=8, spaceAfter=4)))
+        elements.append(Paragraph(context_text, body_style))
         elements.append(Spacer(1, 14))
 
         # 4. Top Riesgos Prioritarios (Criterio de Aceptación 2)

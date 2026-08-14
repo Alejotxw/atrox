@@ -85,6 +85,21 @@ class TestParseNucleiJsonl:
         findings = restored(SAMPLE_NUCLEI_JSONL_MULTI)
         assert len(findings) == 2
 
+    def test_parse_nuclei_jsonl_handles_null_tags(self) -> None:
+        payload = (
+            '{"template-id":"null-tags-check","info":{"name":"Null Tags Check",'
+            '"severity":"medium","tags":null},'
+            '"type":"http","host":"http://10.0.0.1:80",'
+            '"matched-at":"http://10.0.0.1:80/","references":null,"extracted-results":null}'
+        )
+
+        findings = parse_nuclei_jsonl(payload)
+
+        assert len(findings) == 1
+        assert findings[0].tags == []
+        assert findings[0].references == []
+        assert findings[0].extracted_results == []
+
 
 # -- Task 3.5: worker uses executor for parse --------------------------------
 

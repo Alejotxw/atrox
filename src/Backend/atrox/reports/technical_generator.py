@@ -43,6 +43,20 @@ def _split_numbered_steps(text: str | None) -> list[str]:
     return steps
 
 
+def _render_recommendation_steps(item_name: str, text: str | None) -> list[str]:
+    """Devuelve pasos normalizados para representación en formato enumerado."""
+    steps = _split_numbered_steps(text)
+    if not steps:
+        return [f"{item_name}: Aplicar la revisión técnica del componente y validar la mitigación en el entorno objetivo."]
+    normalized = []
+    for idx, step in enumerate(steps, start=1):
+        cleaned = step.strip()
+        if cleaned.lower().startswith(f"{idx}. "):
+            cleaned = cleaned[len(f"{idx}. ") :].strip()
+        normalized.append(f"{idx}. {cleaned}")
+    return normalized
+
+
 def _make_technical_page_callback(template_version: str, target: str):
     def add_header_footer(canvas, doc):
         canvas.saveState()
@@ -303,7 +317,10 @@ class TechnicalReportGenerator:
         if self.data.findings:
             for item in self.data.findings:
                 recommendation = item.remediation_steps or "Aplicar la revisión técnica del componente y validar la mitigación en el entorno objetivo."
-                elements.append(Paragraph(f"• {item.name}: {recommendation}", body_style))
+                steps = _render_recommendation_steps(item.name, recommendation)
+                elements.append(Paragraph(f"<b>{item.name}</b>", body_style))
+                for step in steps:
+                    elements.append(Paragraph(step, body_style))
         else:
             elements.append(Paragraph("No se requieren acciones inmediatas de corrección porque no se detectaron hallazgos puntuales durante la validación.", body_style))
         elements.append(Spacer(1, 8))
@@ -608,7 +625,14 @@ class TechnicalReportGenerator:
         <div class="card">
             <h3>3. Recomendaciones de remediación</h3>
             <ol class="section-list">
-                {''.join(f'<li>{html.escape(item.name)}: {html.escape(item.remediation_steps or "Aplicar la revisión técnica del componente y validar la mitigación en el entorno objetivo.")}</li>' for item in self.data.findings)}
+                {''.join(
+                    f'<li><strong>{html.escape(item.name)}</strong><br/>'
+                    + ''.join(
+                        f'<span>{html.escape(step)}</span><br/>' for step in _render_recommendation_steps(item.name, item.remediation_steps or "Aplicar la revisión técnica del componente y validar la mitigación en el entorno objetivo.")
+                    )
+                    + '</li>'
+                    for item in self.data.findings
+                )}
             </ol>
         </div>
 

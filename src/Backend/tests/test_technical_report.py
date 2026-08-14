@@ -98,6 +98,8 @@ class TestTechnicalReportGenerator:
         assert "Evidencia de Explotación (Proof of Concept - PoC)" in html_str
         assert "sudo systemctl restart apache2" in html_str
         assert f"v{TEMPLATE_VERSION}" in html_str
+        assert "<ol class=\"section-list\">" in html_str
+        assert "1. " in html_str
         assert elapsed < 10.0, f"Generación HTML técnico tomó {elapsed:.3f}s, violando SLA"
 
     def test_sensitive_fields_encryption_at_rest(self):

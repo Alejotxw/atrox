@@ -3,6 +3,8 @@
 from uuid import uuid4
 
 from atrox.queue.models import Job, JobStatus, JobType
+from atrox.security.encryption import EncryptionService, decode_master_key, generate_master_key
+from atrox.security.sensitive_fields import SensitiveFieldEncryptor
 from atrox.queue.service import JobQueue
 from atrox.scanner.audit_outcome import (
     empty_audit_findings,
@@ -85,3 +87,38 @@ def test_resolve_synthesizes_when_nuclei_empty():
     resolved = resolve_vulnscan_findings(vuln, queue)
     assert len(resolved) >= 2
     assert any(f.template_id == "audit:nuclei-empty" for f in resolved)
+
+
+def test_resolve_vulnscan_decrypts_encrypted_description_field(monkeypatch):
+    queue = JobQueue(max_concurrent=2, max_queue_size=10)
+    key = generate_master_key()
+    monkeypatch.setenv("ATROX_ENCRYPTION_MASTER_KEY", key)
+    service = EncryptionService(decode_master_key(key))
+    encryptor = SensitiveFieldEncryptor(service)
+
+    finding = {
+        "template_id": "cve-2024-0001",
+        "name": "CVE cifrada",
+        "severity": "critical",
+        "host": "example.com",
+        "matched_at": "https://example.com",
+        "tags": ["cve"],
+        "description": encryptor.encrypt_fields("finding", {"description": "Detalle sensible cifrado"})["description"],
+        "references": [],
+        "extracted_results": [],
+        "scan_type": "vulnscan",
+        "ip": "example.com",
+        "timestamp": "2026-08-13T00:00:00Z",
+    }
+
+    job = Job(
+        id=uuid4(),
+        job_type=JobType.VULNSCAN,
+        status=JobStatus.DONE,
+        params={"target": "example.com"},
+        result={"findings": [finding]},
+    )
+
+    resolved = resolve_vulnscan_findings(job, queue)
+    assert len(resolved) == 1
+    assert resolved[0].description == "Detalle sensible cifrado"

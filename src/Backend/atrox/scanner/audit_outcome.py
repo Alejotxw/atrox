@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from atrox.queue.models import Job, JobStatus, JobType
 from atrox.queue.service import JobQueue
 from atrox.scanner.models import HostFinding, VulnFinding, VulnSeverity
+from atrox.security.encryption import get_encryption_service
+from atrox.security.sensitive_fields import SensitiveFieldEncryptor
 
 
 def _normalize_target(value: str) -> str:
@@ -141,13 +143,52 @@ def empty_audit_findings(
     return findings
 
 
+def _decrypt_finding_if_needed(value: dict) -> dict:
+    """Toma un finding cifrado y lo devuelve en formato plano para Pydantic."""
+    normalized = dict(value)
+    for field_name in ("description", "evidence", "poc", "raw_output", "poc_evidence", "remediation_steps"):
+        if field_name not in normalized:
+            continue
+        payload = normalized[field_name]
+        if isinstance(payload, dict) and "alg" in payload and "payload" in payload:
+            try:
+                from atrox.config import Settings
+
+                settings = Settings()
+                if settings.encryption_master_key:
+                    encryptor = SensitiveFieldEncryptor(
+                        get_encryption_service(settings.encryption_master_key)
+                    )
+                    normalized[field_name] = encryptor.decrypt_fields("finding", {field_name: payload})[field_name]
+            except Exception:
+                normalized[field_name] = ""
+    try:
+        from atrox.config import Settings
+
+        settings = Settings()
+        if not settings.encryption_master_key:
+            return normalized
+
+        encryptor = SensitiveFieldEncryptor(get_encryption_service(settings.encryption_master_key))
+        return encryptor.decrypt_fields("finding", normalized)
+    except Exception:
+        return normalized
+
+
 def resolve_vulnscan_findings(job: Job, queue: JobQueue) -> list[VulnFinding]:
     """Fuente única para UI/reportes: CVEs reales o resultado informativo del escaneo."""
     raw: list = []
     if job.result and isinstance(job.result, dict):
         raw = job.result.get("findings", []) or []
 
-    findings = [VulnFinding(**f) if isinstance(f, dict) else f for f in raw]
+    findings: list[VulnFinding] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            findings.append(item)
+            continue
+        normalized = _decrypt_finding_if_needed(item)
+        findings.append(VulnFinding(**normalized))
+
     if findings:
         return findings
 

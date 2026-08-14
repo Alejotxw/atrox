@@ -21,6 +21,19 @@ REQUIRED_JSONL_FIELDS = ("template-id", "host", "matched-at")
 REQUIRED_INFO_FIELDS = ("name", "severity")
 
 
+def _normalize_list(value: object) -> list[str]:
+    """Normaliza campos opcionales de JSONL de Nuclei para evitar `None` en modelos Pydantic."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if item is not None]
+    if isinstance(value, tuple):
+        return [str(item) for item in value if item is not None]
+    if isinstance(value, str):
+        return [value]
+    return [str(value)]
+
+
 def parse_nuclei_jsonl(output: str) -> list[VulnFinding]:
     """Parsea la salida JSONL de Nuclei y retorna lista de hallazgos.
 
@@ -79,13 +92,13 @@ def parse_nuclei_jsonl(output: str) -> list[VulnFinding]:
                 severity=severity,
                 host=host,
                 matched_at=matched_at,
-                tags=info.get("tags", []),
-                description=info.get("description", ""),
-                references=info.get("reference", []),
-                extracted_results=data.get("extracted-results", []),
-                scan_type=data.get("type", ""),
-                ip=data.get("ip", ""),
-                timestamp=data.get("timestamp", ""),
+                tags=_normalize_list(info.get("tags")),
+                description=info.get("description", "") or "",
+                references=_normalize_list(info.get("reference")),
+                extracted_results=_normalize_list(data.get("extracted-results")),
+                scan_type=data.get("type", "") or "",
+                ip=data.get("ip", "") or "",
+                timestamp=data.get("timestamp", "") or "",
             )
         )
 
